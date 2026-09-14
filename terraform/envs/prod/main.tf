@@ -309,8 +309,15 @@ module "github_oidc_provider" {
   tags = var.tags
 }
 
-# Scoped to pushes on `main` only — pull_request runs (including from
-# forks, which can edit workflow files) never get AWS credentials.
+# Scoped to pushes on `main` only. Uses GitHub's newer "immutable subject
+# claims" format (repo:OWNER@OWNER_ID/REPO@REPO_ID:ref:...) rather than
+# the older name-only repo:owner/repo:ref:... form — repos created after
+# 2026-07-15 (this one included) get this format by default, and the
+# name-only pattern silently never matches for them (confirmed by a real
+# failed AssumeRoleWithWebIdentity call against the old format, not just
+# a guess). IDs via `gh api repos/<owner>/<repo> --jq
+# '{owner_id:.owner.id, repo_id:.id}'`; they don't change even if the repo
+# or account is later renamed.
 module "github_actions_ecr_push_irsa" {
   source  = "terraform-aws-modules/iam/aws//modules/iam-github-oidc-role"
   version = "~> 5.39"
@@ -318,7 +325,7 @@ module "github_actions_ecr_push_irsa" {
   name = "${var.cluster_name}-github-actions-ecr-push"
 
   subjects = [
-    "${var.github_repository}:ref:refs/heads/main",
+    "${var.github_owner}@${var.github_owner_id}/${var.github_repo}@${var.github_repo_id}:ref:refs/heads/main",
   ]
 
   policies = {

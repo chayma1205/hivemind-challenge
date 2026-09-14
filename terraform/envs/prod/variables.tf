@@ -40,10 +40,28 @@ variable "ecr_repository_name" {
   default     = "hivemind-greeter"
 }
 
-variable "github_repository" {
-  description = "GitHub \"owner/repo\" this cluster's CI/CD pipeline runs from — scopes the GitHub Actions OIDC trust policy."
+variable "github_owner" {
+  description = "GitHub account this cluster's CI/CD pipeline runs from."
   type        = string
-  default     = "chayma1205/hivemind-challenge"
+  default     = "chayma1205"
+}
+
+variable "github_owner_id" {
+  description = "Numeric GitHub account ID for github_owner (`gh api users/<owner> --jq .id`) — GitHub's OIDC \"immutable subject\" format (default for repos created after 2026-07-15) keys on this, not the account name."
+  type        = string
+  default     = "2427500"
+}
+
+variable "github_repo" {
+  description = "GitHub repository name (without the owner) this cluster's CI/CD pipeline runs from."
+  type        = string
+  default     = "hivemind-challenge"
+}
+
+variable "github_repo_id" {
+  description = "Numeric GitHub repository ID (`gh api repos/<owner>/<repo> --jq .id`) — see github_owner_id."
+  type        = string
+  default     = "1370459474"
 }
 
 variable "node_instance_types" {
