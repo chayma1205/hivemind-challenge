@@ -72,7 +72,9 @@ argocd-image-updater:
           set -e
           mkdir -p /shared
           cp -r /usr/local/aws-cli /shared/aws-cli
-          cp -a /usr/local/bin/aws /shared/aws
+          # -L dereferences the symlink chain into a real regular file —
+          # Kubernetes' subPath volume mounts refuse to target a symlink.
+          cp -L /usr/local/bin/aws /shared/aws
       volumeMounts:
         - name: aws-cli
           mountPath: /shared
