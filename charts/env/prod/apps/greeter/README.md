@@ -59,9 +59,11 @@ helm upgrade --install greeter . \
 * `ingress.enabled` defaults to `false` for the same reason as the other
   charts' ingress: it needs the ALB controller and a real domain/ACM
   certificate first.
-* `autoscaling.enabled` defaults to `false` — the cluster has no
-  metrics-server yet (see [`docs/ARCHITECTURE.md`](../../../../docs/ARCHITECTURE.md)'s
-  gap list), so an HPA would have no metrics to scale on.
+* `autoscaling.enabled` defaults to `true`, backed by
+  [`charts/env/prod/critical/metrics-server`](../../critical/metrics-server).
+  If the HPA reports `unable to fetch metrics from resource metrics API`,
+  metrics-server either isn't installed/synced yet or hasn't scraped a
+  cycle since it started (~1 min) — it's not a greeter-side problem.
 * `topologySpreadConstraints` spreads replicas across AZs
   (`ScheduleAnyway`, so it degrades gracefully rather than blocking
   scheduling outright under constrained capacity).

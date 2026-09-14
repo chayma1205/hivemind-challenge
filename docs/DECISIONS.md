@@ -126,3 +126,25 @@ supports as of this writing (September 2026).
 support. Tradeoff: newest versions have had the least real-world soak time;
 pin to an older supported version (e.g. `1.33`) if that matters more than
 runway for a given deployment.
+
+## 10. This GitHub repo is public
+
+**Context:** Argo CD needs to clone this repo to sync
+[`charts/env/prod/argocd-apps.yaml`](../charts/env/prod/argocd-apps.yaml).
+A private repo means Argo CD needs a stored credential (a GitHub PAT in a
+Kubernetes Secret) — an extra moving part, and one that (in the environment
+this was built in) needed a human to create directly, since an AI agent
+writing credentials into a cluster is exactly the kind of action worth a
+human in the loop rather than full automation.
+
+**Decision:** Make the repo public instead. Verified beforehand that
+nothing sensitive is committed — no tokens/keys, just resource names,
+non-secret config, and an AWS account ID (not itself a credential).
+
+**Consequences:** Argo CD clones over plain HTTPS with zero credentials —
+no Secret, no `argocd repo add`, no rotation to think about. Tradeoff: the
+repo (code, infra structure, resource-naming conventions) is visible to
+anyone. Revisit if this ever holds a real customer's infrastructure rather
+than a challenge submission — at that point a private repo + a scoped
+deploy-key Secret (or an OIDC-based credential, no long-lived token at all)
+is the right tradeoff to make instead.

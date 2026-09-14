@@ -90,10 +90,10 @@ TLS-only bucket policy). Locking uses the S3 backend's native
 Helm charts, split by role:
 
 * [`critical/`](../charts/env/prod/critical) — cluster-critical add-ons
-  (Karpenter, the AWS Load Balancer Controller), each a thin wrapper
-  around an upstream chart. Scheduled onto the `role=system` node group via
-  matching `nodeSelector`/tolerations and `priorityClassName:
-  system-cluster-critical`.
+  (Karpenter, the AWS Load Balancer Controller, metrics-server), each a
+  thin wrapper around an upstream chart. Scheduled onto the `role=system`
+  node group via matching `nodeSelector`/tolerations and
+  `priorityClassName: system-cluster-critical`.
 * [`central-services/`](../charts/env/prod/central-services) — Argo CD,
   installed once for the cluster. Same node placement as `critical/`.
 * [`apps/`](../charts/env/prod/apps) — actual application workloads (just
@@ -103,45 +103,48 @@ Helm charts, split by role:
 
 ## Current live state
 
-As of this writing, `hivemind-prod` is a real running cluster, not just
-Terraform code:
+`hivemind-prod` is a real running cluster, not just Terraform code, and
+has been taken through several rounds of "deploy it, see what actually
+breaks, fix it" rather than only validated with `helm template`:
 
 * VPC/ECR/EKS: applied, including the `role=system` taint/label on the
   node group.
 * IRSA for Karpenter's controller (+ node IAM role + interruption queue)
   and the ALB controller: applied (`module.karpenter`,
   `module.aws_load_balancer_controller_irsa` in
-  `terraform/envs/prod/main.tf`) and wired into both charts' `values.yaml`.
-* Argo CD: `helm install`ed and healthy, running on the system node group.
-* [`charts/env/prod/argocd-apps.yaml`](../charts/env/prod/argocd-apps.yaml):
-  applied — four `Application` resources exist in the `argocd` namespace.
+  `terraform/envs/prod/main.tf`) and wired into their charts' `values.yaml`.
+* Karpenter's discovery tags: applied to the VPC's private subnets and the
+  EKS node security group — its `NodePool` successfully provisions real
+  nodes (verified: `c7a.medium` instances joining and going `Ready`).
+* Argo CD: `helm install`ed, healthy, self-managing via
+  [`charts/env/prod/argocd-apps.yaml`](../charts/env/prod/argocd-apps.yaml).
+  This repo is public specifically so Argo CD can clone it with no stored
+  credentials.
+* The greeter app: a real image is built, pushed to ECR, and running
+  (verified end-to-end with an actual HTTP request through the Service).
+* metrics-server: backs the greeter chart's HPA (`autoscaling.enabled:
+  true`).
+
+Bugs found and fixed by actually running this (not just reading the specs):
+the community `terraform-aws-modules/eks/aws//modules/karpenter` module's
+default IAM policy omits `iam:ListInstanceProfiles` (can't be
+resource-scoped, so its own scoped statements never cover it); the
+NodePool chart had `expireAfter` nested under the wrong API field
+(`spec.disruption` instead of `spec.template.spec` — silently accepted on
+create, rejected on update); and an `instance-category`-only requirement
+let Karpenter select legacy families like `m1.small` that launch but can
+never register with the cluster.
 
 ## What isn't built yet
 
-* **Argo CD has no repo access.** The Applications in `argocd-apps.yaml`
-  point at this repo, which is private — Argo CD needs a registered
-  credential (`argocd repo add ...` or a `repository`-labeled Secret, see
-  RUNBOOK step 5) before any of them can actually sync. This step involves
-  writing a GitHub token into the cluster, which needs to be done
-  deliberately rather than automated — see RUNBOOK for the exact command.
-* **No general-workload node capacity.** The only node group is reserved
-  for critical/central-services (see Compute, above). Karpenter's IAM side
-  is wired up, but its `NodePool` still can't launch anything because:
-* **Karpenter's discovery tags are missing** — it finds subnets/security
-  groups by tag, and that tag isn't yet applied to the VPC module's
-  private subnets or the node security group in `terraform/envs/prod` (see
-  the karpenter chart's README).
 * The `HELLO_TAG` URL-parameter change to `app/greeter.go` itself (from the
   challenge README) hasn't been made.
-* **No real greeter image.** `argocd-apps.yaml`'s `greeter` Application
-  pins `image.tag: "unset"` — nothing has been built and pushed yet (see
-  RUNBOOK step 4).
 * A CI/CD pipeline (build → scan → push to ECR → update `image.tag` in
-  `argocd-apps.yaml` → Argo CD syncs) — today that last step is a manual
-  file edit, not automated.
-* Observability stack (metrics, logs, alerting) beyond what EKS/CloudWatch
-  provide by default — note the app chart also can't autoscale on CPU yet
-  since there's no metrics-server.
+  [`charts/env/prod/apps/greeter/argocd-params.env`](../charts/env/prod/apps/greeter/argocd-params.env)
+  → regenerate `argocd-apps.yaml` → Argo CD syncs) — today that whole
+  sequence is manual.
+* Observability beyond metrics-server / EKS-CloudWatch defaults — no log
+  aggregation, alerting, or dashboards.
 
 These are called out explicitly (rather than hand-waved) so the current
 state of the system is unambiguous; see [RUNBOOK.md](RUNBOOK.md) for what

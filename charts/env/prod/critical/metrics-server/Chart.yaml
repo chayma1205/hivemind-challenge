@@ -1,0 +1,11 @@
+apiVersion: v2
+name: metrics-server
+description: Provisions metrics-server for the prod EKS cluster (required for HPA CPU/memory targets)
+type: application
+version: 0.1.0
+appVersion: "0.9.0"
+
+dependencies:
+  - name: metrics-server
+    version: "3.14.0"
+    repository: https://kubernetes-sigs.github.io/metrics-server/
