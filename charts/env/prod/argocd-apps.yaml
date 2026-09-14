@@ -118,7 +118,7 @@ spec:
         - name: image.repository
           value: "324464328617.dkr.ecr.us-east-1.amazonaws.com/hivemind-greeter"
         - name: image.tag
-          value: "unset"
+          value: "0834255"
         - name: env.HELLO_TAG
           value: "hivemind-prod"
   destination:
