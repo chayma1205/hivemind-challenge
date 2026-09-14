@@ -1,0 +1,67 @@
+replicaCount: 2
+
+image:
+  # TODO: set to `terraform output -raw ecr_repository_url` from
+  # terraform/envs/prod. Left blank so an unfilled deploy fails loudly
+  # rather than pulling a wrong/nonexistent image.
+  repository: ""
+  # TODO: an immutable tag (e.g. git SHA) pushed by CI — never "latest",
+  # the ECR repo's tag mutability is IMMUTABLE (see terraform/envs/prod).
+  tag: ""
+  pullPolicy: IfNotPresent
+
+# Every rendered value here becomes a container env var. HELLO_TAG is
+# echoed back in every response (see app/greeter.go) — set it to something
+# unique per deployment/environment.
+env:
+  HELLO_TAG: ""
+
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 8080
+
+ingress:
+  # Enable once charts/env/prod/critical/aws-load-balancer-controller is
+  # installed and a real domain/ACM cert exist for prod.
+  enabled: false
+  ingressClassName: alb
+  annotations:
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/backend-protocol: HTTP
+    alb.ingress.kubernetes.io/healthcheck-path: /
+  # TODO: replace with the real prod hostname.
+  host: greeter.example.com
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 32Mi
+  limits:
+    memory: 64Mi
+
+autoscaling:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 6
+  targetCPUUtilizationPercentage: 70
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+# Spread pods across AZs instead of piling onto one; ScheduleAnyway so a
+# temporary imbalance doesn't block scheduling outright.
+topologySpreadConstraints:
+  enabled: true
+  maxSkew: 1
+  whenUnsatisfiable: ScheduleAnyway
+
+# This is app workload, not a cluster-critical add-on, so it deliberately
+# does NOT set nodeSelector/tolerations for the `role=system` /
+# CriticalAddonsOnly-tainted node group (contrast with
+# charts/env/prod/critical/*) — see this chart's README for what that
+# implies about current cluster capacity.
+nodeSelector: {}
+tolerations: []

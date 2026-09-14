@@ -1,0 +1,11 @@
+apiVersion: v2
+name: karpenter
+description: Provisions Karpenter (node autoscaling) for the prod EKS cluster
+type: application
+version: 0.1.0
+appVersion: "1.14.1"
+
+dependencies:
+  - name: karpenter
+    version: "1.14.1"
+    repository: oci://public.ecr.aws/karpenter

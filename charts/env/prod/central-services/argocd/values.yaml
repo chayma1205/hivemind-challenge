@@ -1,0 +1,85 @@
+# Values passed through to the argo-cd subchart (dependency name: argo-cd).
+# Full reference: https://github.com/argoproj/argo-helm/blob/argo-cd-10.9.1/charts/argo-cd/values.yaml
+argo-cd:
+  global:
+    # TODO: replace once a real domain + ACM certificate exist for prod.
+    domain: argocd.example.com
+
+    # Pin every component to the system node group (see
+    # terraform/envs/prod's eks_managed_node_groups.default: labels
+    # role=system, taint CriticalAddonsOnly=true:NoSchedule) so ArgoCD
+    # doesn't compete with app workload capacity. Every component
+    # (server/controller/repoServer/applicationSet/redis/dex/notifications)
+    # falls back to these unless it sets its own override.
+    priorityClassName: system-cluster-critical
+    nodeSelector:
+      role: system
+    tolerations:
+      - key: CriticalAddonsOnly
+        operator: Equal
+        value: "true"
+        effect: NoSchedule
+
+  configs:
+    params:
+      # TLS terminates at the ALB (see server.ingress below); the server
+      # itself can stay plain HTTP behind it.
+      server.insecure: true
+    rbac:
+      policy.default: role:readonly
+
+  server:
+    replicas: 2
+    ingress:
+      # Enable once charts/env/prod/critical/aws-load-balancer-controller is
+      # installed and global.domain/ACM cert are configured.
+      enabled: false
+      ingressClassName: alb
+      annotations:
+        alb.ingress.kubernetes.io/scheme: internet-facing
+        alb.ingress.kubernetes.io/target-type: ip
+        alb.ingress.kubernetes.io/backend-protocol: HTTP
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        memory: 256Mi
+
+  controller:
+    replicas: 1
+    resources:
+      requests:
+        cpu: 250m
+        memory: 256Mi
+      limits:
+        memory: 1Gi
+
+  repoServer:
+    replicas: 2
+    autoscaling:
+      enabled: true
+      minReplicas: 2
+      maxReplicas: 4
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        memory: 512Mi
+
+  applicationSet:
+    replicas: 2
+
+  redis:
+    resources:
+      requests:
+        cpu: 100m
+        memory: 64Mi
+      limits:
+        memory: 256Mi
+
+  notifications:
+    # Enable and configure a notifier (Slack/email/webhook) once alerting
+    # requirements are defined.
+    enabled: false

@@ -1,0 +1,43 @@
+# Values passed through to the aws-load-balancer-controller subchart
+# (dependency name: aws-load-balancer-controller).
+# Full reference: https://github.com/aws/eks-charts/blob/master/stable/aws-load-balancer-controller/values.yaml
+aws-load-balancer-controller:
+  # Must match terraform var.cluster_name (terraform/envs/prod).
+  clusterName: hivemind-prod
+  region: us-east-1
+  # TODO: set to `terraform output vpc_id` from terraform/envs/prod, or
+  # leave unset to let the controller discover it from instance metadata.
+  vpcId: ""
+
+  ingressClass: alb
+  createIngressClassResource: true
+
+  serviceAccount:
+    create: true
+    annotations:
+      # TODO: ARN of the IRSA role for the controller (needs the AWS-managed
+      # AWSLoadBalancerControllerIAMPolicy). Not yet provisioned in
+      # terraform/envs/prod — see README.
+      eks.amazonaws.com/role-arn: ""
+
+  replicaCount: 2
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      memory: 256Mi
+
+  # Pin to the system node group (terraform/envs/prod's
+  # eks_managed_node_groups.default: labels role=system, taint
+  # CriticalAddonsOnly=true:NoSchedule). The chart already defaults
+  # `priorityClassName: system-cluster-critical`; nodeSelector/tolerations
+  # default to empty here, so both need setting explicitly.
+  nodeSelector:
+    role: system
+  tolerations:
+    - key: CriticalAddonsOnly
+      operator: Equal
+      value: "true"
+      effect: NoSchedule

@@ -1,0 +1,65 @@
+# Values passed through to the karpenter subchart (dependency name: karpenter).
+# Full reference: https://github.com/aws/karpenter-provider-aws/blob/v1.14.1/charts/karpenter/values.yaml
+karpenter:
+  settings:
+    # Must match terraform var.cluster_name (terraform/envs/prod).
+    clusterName: hivemind-prod
+    # Leave empty: Karpenter discovers the endpoint at startup on EKS.
+    clusterEndpoint: ""
+    eksControlPlane: true
+    # TODO: name of the SQS queue receiving EC2 interruption/rebalance
+    # events, once provisioned (see README's IAM/infra prerequisites).
+    interruptionQueue: ""
+
+  serviceAccount:
+    create: true
+    annotations:
+      # TODO: ARN of the IRSA role for the Karpenter controller. Not yet
+      # provisioned in terraform/envs/prod — see README.
+      eks.amazonaws.com/role-arn: ""
+
+  replicas: 2
+
+  controller:
+    resources:
+      requests:
+        cpu: 200m
+        memory: 256Mi
+      limits:
+        memory: 512Mi
+
+  # Pin to the system node group (terraform/envs/prod's
+  # eks_managed_node_groups.default: labels role=system, taint
+  # CriticalAddonsOnly=true:NoSchedule) so the controller isn't itself a
+  # workload Karpenter has to find capacity for. The chart already defaults
+  # `priorityClassName: system-cluster-critical` and a
+  # `CriticalAddonsOnly` toleration (operator: Exists, matching our taint
+  # regardless of value/effect) — only nodeSelector needs adding here.
+  nodeSelector:
+    role: system
+
+# Values for this chart's own templates (NodePool / EC2NodeClass), not the
+# karpenter subchart.
+nodePool:
+  # IAM role Karpenter-launched EC2 instances assume (NOT an instance
+  # profile ARN — Karpenter creates the instance profile itself from this
+  # role name). TODO: the EKS managed node group's role, or a dedicated
+  # Karpenter node role, once provisioned in terraform/envs/prod.
+  nodeRoleName: ""
+  # Tags used to discover subnets/security groups for launched nodes.
+  # TODO: apply the matching `karpenter.sh/discovery = <cluster-name>` tag
+  # to the VPC's private subnets and the node security group in Terraform.
+  discoveryTagKey: karpenter.sh/discovery
+  discoveryTagValue: hivemind-prod
+
+  amiFamily: AL2023
+
+  instanceCategories: ["c", "m", "r"]
+  capacityTypes: ["on-demand"]
+
+  limits:
+    cpu: "100"
+
+  consolidationPolicy: WhenEmptyOrUnderutilized
+  consolidateAfter: 5m
+  expireAfter: 720h

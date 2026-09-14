@@ -1,0 +1,11 @@
+apiVersion: v2
+name: aws-load-balancer-controller
+description: Provisions the AWS Load Balancer Controller for the prod EKS cluster
+type: application
+version: 0.1.0
+appVersion: "3.5.0"
+
+dependencies:
+  - name: aws-load-balancer-controller
+    version: "3.5.0"
+    repository: https://aws.github.io/eks-charts

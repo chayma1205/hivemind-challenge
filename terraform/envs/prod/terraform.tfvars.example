@@ -1,0 +1,15 @@
+aws_region  = "us-east-1"
+aws_profile = "hivemind"
+
+cluster_name    = "hivemind-prod"
+cluster_version = "1.36"
+
+vpc_cidr           = "10.0.0.0/16"
+single_nat_gateway = false
+
+ecr_repository_name = "hivemind-greeter"
+
+node_instance_types = ["t3.medium"]
+node_min_size       = 2
+node_max_size       = 4
+node_desired_size   = 2
