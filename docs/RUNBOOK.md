@@ -93,11 +93,19 @@ so Argo CD clones it over plain HTTPS with no registered credential — no
 kubectl apply -n argocd -f charts/env/prod/argocd-apps.yaml
 ```
 
+This is a one-time step. That file includes a `root` Application that
+watches itself, so every future regeneration — via
+`scripts/generate-argocd-apps.sh`, including the CD pipeline's own commits
+bumping greeter's image tag — is picked up and applied automatically.
+`kubectl apply` only needs running again if the `root` Application itself
+is ever deleted.
+
 From this point, changing what's deployed means editing a chart's
 `values.yaml` (or, for the greeter image, the `helm.parameters` in
-[`argocd-apps.yaml`](../charts/env/prod/argocd-apps.yaml)), committing, and
-letting Argo CD's `automated: {prune: true, selfHeal: true}` sync policy
-apply it — not running `helm upgrade` by hand.
+[`argocd-apps.yaml`](../charts/env/prod/argocd-apps.yaml) — normally
+managed by [`cd.yml`](../.github/workflows/cd.yml), not by hand),
+committing, and letting Argo CD's `automated: {prune: true, selfHeal:
+true}` sync policy apply it — not running `helm upgrade` by hand.
 
 The `karpenter` and `aws-load-balancer-controller` Applications will sync
 but their pods won't come up healthy until the IAM prerequisites in their

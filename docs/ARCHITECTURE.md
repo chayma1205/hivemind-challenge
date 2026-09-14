@@ -162,13 +162,36 @@ never register with the cluster.
   — short-lived per-run credentials, no long-lived AWS key stored in
   GitHub), then commits the new tag into
   [`argocd-params.env`](../charts/env/prod/apps/greeter/argocd-params.env)
-  and regenerates `argocd-apps.yaml`. It stops there — Argo CD (already
-  watching this repo) picks up that commit and applies it; the pipeline
-  never touches the cluster directly.
-* Found by actually running the scan against the real image, not just
-  wiring the step: the `golang:1.22-alpine` builder had known CRITICAL/HIGH
-  Go stdlib CVEs. Bumped to `golang:1.25-alpine` (and `go.mod` to match) —
-  confirmed clean afterward.
+  and regenerates `argocd-apps.yaml`. It stops there — the pipeline never
+  touches the cluster directly; Argo CD's `root` Application (see below)
+  is what actually applies that commit.
+
+Three real bugs found by actually running the pipeline end-to-end (a PR
+and a merge, not just `helm template`/reading the YAML):
+
+* The `golang:1.22-alpine` builder had known CRITICAL/HIGH Go stdlib
+  CVEs, caught by the Trivy step itself. Bumped to `golang:1.25-alpine`
+  (and `go.mod` to match) — confirmed clean afterward.
+* `trivy-action@v0.28.0`'s composite action depended on a `setup-trivy`
+  version that no longer resolves — the scan job failed at setup, before
+  scanning anything. Bumped to `v0.36.0`.
+* GitHub's OIDC `sub` claim for repos created after 2026-07-15 (this one
+  included) uses an "immutable subject" format —
+  `repo:OWNER@OWNER_ID/REPO@REPO_ID:ref:...` — not the older
+  `repo:owner/repo:ref:...` shown in most existing docs/tutorials. The
+  AWS IAM trust condition using the old format never matched, so
+  `sts:AssumeRoleWithWebIdentity` failed with no indication *why* until
+  traced back to this. Fixed by rebuilding the subject from
+  `github_owner`/`github_owner_id`/`github_repo`/`github_repo_id` in
+  `terraform/envs/prod/variables.tf`.
+* `argocd-apps.yaml` itself was a plain manifest nobody was watching —
+  `cd.yml` correctly committed the new image tag into it, but nothing
+  re-applied it to the cluster, so the `greeter` Application's live spec
+  silently stayed on the old tag despite git having the new one. Fixed by
+  having `scripts/generate-argocd-apps.sh` always emit a `root`
+  Application (a `directory`-type source watching just this file)
+  alongside the per-chart ones — bootstrapped once, it makes every future
+  regeneration self-applying.
 
 ## What isn't built yet
 
