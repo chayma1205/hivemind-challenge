@@ -1,0 +1,124 @@
+name: CI
+
+# GitHub-flow: feature branches PR into main. This workflow validates every
+# PR and every push to main; nothing here ever needs AWS credentials — it
+# only builds and scans, it never pushes an image anywhere. That happens
+# in cd.yml, which only runs after this workflow succeeds on main (see
+# its `workflow_run` trigger) — deploy never runs un-gated by CI.
+#
+# Scoped to app/** so a GitOps-only commit (cd.yml updating
+# argocd-params.env) doesn't retrigger this and, transitively, cd.yml
+# itself — see cd.yml's own comment for the rest of that loop-prevention.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "app/**"
+      - ".github/workflows/ci.yml"
+  push:
+    branches: [main]
+    paths:
+      - "app/**"
+      - ".github/workflows/ci.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GO_VERSION: "1.25"
+  IMAGE_NAME: hivemind-greeter
+
+jobs:
+  lint-and-test:
+    name: Lint, vet, test (Go)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          # No go.sum in app/ — greeter.go has zero non-stdlib dependencies,
+          # so there's nothing for setup-go's module cache to key off of.
+          cache: false
+
+      - name: gofmt check
+        run: |
+          # gofmt -l lists files that aren't formatted; fail if it finds any.
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "::error::The following files are not gofmt-formatted:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go build
+        run: go build -o /dev/null ./...
+
+      - name: go test
+        run: go test ./... -v
+
+  build-and-scan:
+    name: Build image and scan for vulnerabilities
+    runs-on: ubuntu-latest
+    needs: lint-and-test
+    permissions:
+      contents: read
+      security-events: write # to upload the Trivy SARIF report
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build image (not pushed — CI never touches the registry)
+        uses: docker/build-push-action@v6
+        with:
+          context: app
+          push: false
+          load: true
+          tags: ${{ env.IMAGE_NAME }}:ci-${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Scan image with Trivy
+        uses: aquasecurity/trivy-action@v0.28.0
+        with:
+          image-ref: ${{ env.IMAGE_NAME }}:ci-${{ github.sha }}
+          format: sarif
+          output: trivy-results.sarif
+          severity: CRITICAL,HIGH
+          # Fails the job on any CRITICAL/HIGH finding — a PR with a
+          # known-vulnerable base image or dependency shouldn't merge
+          # silently.
+          exit-code: "1"
+          ignore-unfixed: true
+
+      - name: Upload Trivy results to the Security tab
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-results.sarif
+
+  helm-lint:
+    name: Lint the greeter Helm chart
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/setup-helm@v4
+        with:
+          version: "v3.17.3"
+
+      - name: helm lint
+        working-directory: charts/env/prod/apps/greeter
+        run: helm lint . --set image.repository=placeholder --set image.tag=placeholder

@@ -148,19 +148,38 @@ create, rejected on update); and an `instance-category`-only requirement
 let Karpenter select legacy families like `m1.small` that launch but can
 never register with the cluster.
 
+## CI/CD (`.github/workflows/`)
+
+* [`ci.yml`](../.github/workflows/ci.yml) — runs on every PR and push to
+  `main` touching `app/**`: `gofmt`/`vet`/build/test, a Docker build
+  (never pushed), a Trivy scan (fails on CRITICAL/HIGH, uploaded to the
+  Security tab), and a `helm lint` of the greeter chart. Needs no AWS
+  credentials at all.
+* [`cd.yml`](../.github/workflows/cd.yml) — triggers only via `workflow_run`
+  after `ci.yml` succeeds on `main` (never on a PR or a fork). Rebuilds the
+  same commit, scans again, pushes to ECR via GitHub's OIDC provider
+  (`module.github_actions_ecr_push_irsa` in `terraform/envs/prod/main.tf`
+  — short-lived per-run credentials, no long-lived AWS key stored in
+  GitHub), then commits the new tag into
+  [`argocd-params.env`](../charts/env/prod/apps/greeter/argocd-params.env)
+  and regenerates `argocd-apps.yaml`. It stops there — Argo CD (already
+  watching this repo) picks up that commit and applies it; the pipeline
+  never touches the cluster directly.
+* Found by actually running the scan against the real image, not just
+  wiring the step: the `golang:1.22-alpine` builder had known CRITICAL/HIGH
+  Go stdlib CVEs. Bumped to `golang:1.25-alpine` (and `go.mod` to match) —
+  confirmed clean afterward.
+
 ## What isn't built yet
 
 * The `HELLO_TAG` URL-parameter change to `app/greeter.go` itself (from the
   challenge README) hasn't been made.
-* A CI pipeline that builds/scans/pushes on every commit doesn't exist —
-  images are still built and pushed by hand (RUNBOOK step 4).
-* Argo CD Image Updater is installed but not wired to actually update
-  anything yet: the `greeter` Application has no
-  `argocd-image-updater.argoproj.io/image-list` annotation telling it
-  which image to watch, so pushing a new tag to ECR today still means
-  manually editing
-  [`argocd-params.env`](../charts/env/prod/apps/greeter/argocd-params.env)
-  and regenerating `argocd-apps.yaml`.
+* Argo CD Image Updater is installed (with ECR read IRSA, verified working
+  end-to-end) but not wired to actually update anything yet: the `greeter`
+  Application has no `argocd-image-updater.argoproj.io/image-list`
+  annotation telling it which image to watch. In practice this doesn't
+  block deploys — `cd.yml` already handles the tag bump — but Image
+  Updater's own automatic-detection path is unused.
 * No real domain — cert-manager's `ClusterIssuer` is disabled
   ([`clusterIssuer.enabled: false`](../charts/env/prod/critical/cert-manager/values.yaml)),
   and every chart's `ingress.enabled` stays `false` for the same reason.

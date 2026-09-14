@@ -1,0 +1,145 @@
+name: CD
+
+# Deploys only after CI has gone green on main (workflow_run below) — never
+# runs un-gated by CI, and never runs at all for a PR or a fork (both of
+# which only ever trigger the CI workflow, not this one).
+#
+# GitOps hand-off, not a direct deploy: this workflow's job ends at
+# "pushed a new image tag to ECR and committed that tag into
+# argocd-params.env" — it never touches the cluster directly. Argo CD
+# (already running in-cluster, watching this repo) picks up the commit and
+# applies it. That's also why this workflow needs no Kubernetes
+# credentials at all, only the narrow ECR-push OIDC role below.
+#
+# Loop prevention: this workflow's own commit (step "Update
+# argocd-params.env & regenerate argocd-apps.yaml") only touches GitOps
+# files, never anything under app/ — so it can't retrigger ci.yml's
+# `paths: [app/**]` filter, which is what this workflow's trigger chains
+# off of. The `[skip ci]` in that commit message is defense in depth on
+# top of the path filter, not a substitute for it.
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  # One deploy at a time; never cancel one that's already pushing an image.
+  group: cd-main
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: us-east-1
+  ECR_REPOSITORY: hivemind-greeter
+  # terraform/envs/prod output `github_actions_ecr_push_role_arn`.
+  AWS_ROLE_ARN: arn:aws:iam::324464328617:role/hivemind-prod-github-actions-ecr-push
+
+jobs:
+  build-scan-push:
+    name: Build, scan, and push the release image
+    if: github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # required for AWS OIDC — no static AWS keys anywhere
+      security-events: write
+    outputs:
+      image_tag: ${{ steps.vars.outputs.image_tag }}
+    steps:
+      # Deploy exactly the commit CI validated, not whatever main has
+      # drifted to since (there's normally no drift in the seconds
+      # between the two, but this is the correct commit to build either
+      # way).
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Compute image tag
+        id: vars
+        env:
+          FULL_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          # 7-char short SHA, matching this repo's existing tag convention
+          # (see docs/RUNBOOK.md step 4 / `git rev-parse --short HEAD`).
+          echo "image_tag=${FULL_SHA:0:7}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: app
+          push: false
+          load: true
+          tags: ${{ env.ECR_REPOSITORY }}:${{ steps.vars.outputs.image_tag }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Scan image with Trivy
+        uses: aquasecurity/trivy-action@v0.28.0
+        with:
+          image-ref: ${{ env.ECR_REPOSITORY }}:${{ steps.vars.outputs.image_tag }}
+          format: sarif
+          output: trivy-results.sarif
+          severity: CRITICAL,HIGH
+          exit-code: "1"
+          ignore-unfixed: true
+
+      - name: Upload Trivy results to the Security tab
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-results.sarif
+
+      - name: Configure AWS credentials (OIDC, short-lived)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: aws-actions/amazon-ecr-login@v2
+        id: ecr-login
+
+      - name: Tag and push
+        env:
+          REGISTRY: ${{ steps.ecr-login.outputs.registry }}
+          TAG: ${{ steps.vars.outputs.image_tag }}
+        run: |
+          docker tag "${ECR_REPOSITORY}:${TAG}" "${REGISTRY}/${ECR_REPOSITORY}:${TAG}"
+          docker push "${REGISTRY}/${ECR_REPOSITORY}:${TAG}"
+
+  update-gitops:
+    name: Point argocd-apps.yaml at the new image
+    needs: build-scan-push
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # to commit the new tag back to main
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Set new image tag
+        run: |
+          sed -i "s/^image.tag=.*/image.tag=${{ needs.build-scan-push.outputs.image_tag }}/" \
+            charts/env/prod/apps/greeter/argocd-params.env
+
+      - name: Regenerate argocd-apps.yaml
+        run: ./scripts/generate-argocd-apps.sh
+
+      - name: Commit and push
+        env:
+          IMAGE_TAG: ${{ needs.build-scan-push.outputs.image_tag }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add charts/env/prod/apps/greeter/argocd-params.env charts/env/prod/argocd-apps.yaml
+          if git diff --cached --quiet; then
+            echo "No change (tag already deployed) — nothing to commit."
+            exit 0
+          fi
+          git commit -m "deploy: greeter ${IMAGE_TAG} [skip ci]"
+          git push origin main

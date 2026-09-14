@@ -40,6 +40,12 @@ variable "ecr_repository_name" {
   default     = "hivemind-greeter"
 }
 
+variable "github_repository" {
+  description = "GitHub \"owner/repo\" this cluster's CI/CD pipeline runs from — scopes the GitHub Actions OIDC trust policy."
+  type        = string
+  default     = "chayma1205/hivemind-challenge"
+}
+
 variable "node_instance_types" {
   description = "Instance types for the EKS managed node group."
   type        = list(string)

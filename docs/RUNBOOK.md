@@ -50,6 +50,15 @@ kubectl get nodes    # sanity check
 
 ## 4. Build and push the greeter image
 
+Normally automatic: merging to `main` runs
+[`ci.yml`](../.github/workflows/ci.yml) (build/test/scan) then
+[`cd.yml`](../.github/workflows/cd.yml) (build, scan, push to ECR via
+GitHub OIDC, commit the new tag into `argocd-params.env`) — see
+[ARCHITECTURE.md](ARCHITECTURE.md#cicd-githubworkflows). Argo CD picks up
+that commit on its own; nothing further to do.
+
+For a manual build/push (debugging, or pushing without going through CI):
+
 ```bash
 cd app
 ECR_URL=$(terraform -chdir=../terraform/envs/prod output -raw ecr_repository_url)

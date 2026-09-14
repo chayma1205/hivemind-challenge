@@ -148,3 +148,40 @@ anyone. Revisit if this ever holds a real customer's infrastructure rather
 than a challenge submission — at that point a private repo + a scoped
 deploy-key Secret (or an OIDC-based credential, no long-lived token at all)
 is the right tradeoff to make instead.
+
+## 11. CI/CD: two workflows, OIDC, GitOps hand-off — not a direct deploy
+
+**Context:** Needed a pipeline to build, scan, and ship the greeter image
+on every merge to `main`, without reintroducing the problems the rest of
+this repo was built to avoid (long-lived AWS keys, a pipeline that can
+silently deploy without passing CI, direct cluster credentials sitting in
+GitHub).
+
+**Decision:** Two separate workflows, not one:
+
+* `ci.yml` runs on every PR and push to `main`, needs no AWS access at
+  all, and never pushes an image anywhere — it only builds (locally,
+  discarded after) and scans.
+* `cd.yml` triggers via `workflow_run` *after* `ci.yml` succeeds on
+  `main` — never on a PR, never on a fork (both only ever trigger
+  `ci.yml`). It authenticates to AWS via GitHub's OIDC provider
+  (`module.github_actions_ecr_push_irsa`), scoped to `ref:refs/heads/main`
+  only and to push-only actions on the single greeter ECR repo ARN — no
+  AWS access key stored in GitHub, and no ECR permission beyond what
+  pushing an image actually requires. It stops at committing the new tag
+  into `argocd-params.env`; Argo CD (already watching this repo) does the
+  actual deploy.
+
+**Consequences:** A compromised PR (even from a fork editing workflow
+files) never gets AWS credentials — only a merged, CI-passed commit on
+`main` can trigger a push, and only to that one repo. Losing the GitHub
+OIDC role does less damage than losing a static key would (short-lived,
+narrowly scoped, revocable by deleting the trust relationship). Tradeoff:
+`cd.yml` rebuilds the same commit rather than reusing `ci.yml`'s build
+artifact directly — a deliberate simplicity/reproducibility choice
+(Dockerfile-pinned, so this is a real rebuild-for-rebuild match, not a
+"trust the past" leap) over the added complexity of passing a `docker
+save`d image between workflows. The pipeline's own commit-back to
+`argocd-params.env` is prevented from re-triggering itself by `ci.yml`'s
+`paths: [app/**]` filter (that commit never touches `app/`) plus a
+`[skip ci]` commit message as defense in depth.

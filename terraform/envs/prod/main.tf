@@ -295,3 +295,69 @@ resource "aws_iam_role_policy_attachment" "argocd_image_updater_ecr_read" {
   role       = module.argocd_image_updater_irsa.iam_role_name
   policy_arn = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
 }
+
+################################################################################
+# GitHub Actions OIDC — lets the .github/workflows/cd.yml pipeline push to
+# ECR with short-lived, per-run credentials instead of a long-lived AWS
+# access key stored as a repo secret.
+################################################################################
+
+module "github_oidc_provider" {
+  source  = "terraform-aws-modules/iam/aws//modules/iam-github-oidc-provider"
+  version = "~> 5.39"
+
+  tags = var.tags
+}
+
+# Scoped to pushes on `main` only — pull_request runs (including from
+# forks, which can edit workflow files) never get AWS credentials.
+module "github_actions_ecr_push_irsa" {
+  source  = "terraform-aws-modules/iam/aws//modules/iam-github-oidc-role"
+  version = "~> 5.39"
+
+  name = "${var.cluster_name}-github-actions-ecr-push"
+
+  subjects = [
+    "${var.github_repository}:ref:refs/heads/main",
+  ]
+
+  policies = {
+    ecr_push = aws_iam_policy.github_actions_ecr_push.arn
+  }
+
+  tags = var.tags
+
+  depends_on = [module.github_oidc_provider]
+}
+
+data "aws_iam_policy_document" "github_actions_ecr_push" {
+  # ECR's auth token endpoint has no resource-level permissions.
+  statement {
+    sid       = "ECRAuth"
+    effect    = "Allow"
+    actions   = ["ecr:GetAuthorizationToken"]
+    resources = ["*"]
+  }
+
+  statement {
+    sid    = "ECRPushToGreeterRepoOnly"
+    effect = "Allow"
+    actions = [
+      "ecr:BatchCheckLayerAvailability",
+      "ecr:GetDownloadUrlForLayer",
+      "ecr:BatchGetImage",
+      "ecr:PutImage",
+      "ecr:InitiateLayerUpload",
+      "ecr:UploadLayerPart",
+      "ecr:CompleteLayerUpload",
+    ]
+    resources = [module.ecr_greeter.repository_arn]
+  }
+}
+
+resource "aws_iam_policy" "github_actions_ecr_push" {
+  name        = "${var.cluster_name}-github-actions-ecr-push"
+  description = "Push-only access to the greeter ECR repo, for CI/CD via GitHub OIDC"
+  policy      = data.aws_iam_policy_document.github_actions_ecr_push.json
+  tags        = var.tags
+}

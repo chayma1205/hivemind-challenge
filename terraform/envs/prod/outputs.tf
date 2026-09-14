@@ -68,3 +68,8 @@ output "argocd_image_updater_iam_role_arn" {
   description = "IRSA role ARN for argocd-image-updater's ECR read access — set in that chart's serviceAccount.annotations."
   value       = module.argocd_image_updater_irsa.iam_role_arn
 }
+
+output "github_actions_ecr_push_role_arn" {
+  description = "OIDC role ARN GitHub Actions assumes to push to ECR — set as AWS_ROLE_ARN in .github/workflows/cd.yml."
+  value       = module.github_actions_ecr_push_irsa.arn
+}
