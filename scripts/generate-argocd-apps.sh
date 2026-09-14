@@ -33,6 +33,40 @@ declare -A CATEGORY_NAMESPACE=(
   [critical]="kube-system"
 )
 
+emit_root_app() {
+  # Argo CD Application for this file itself, so that once it's applied
+  # (the one manual bootstrap step), every future regeneration of this
+  # file — including the CD pipeline's own commits bumping
+  # greeter's image tag — gets picked up and applied automatically.
+  # Without this, argocd-apps.yaml is just a plain manifest nobody
+  # watches: `kubectl apply` once, then silently stale forever after.
+  cat <<EOF
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: root
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: ${REPO_URL}
+    targetRevision: ${TARGET_REVISION}
+    path: charts/env/prod
+    directory:
+      include: "argocd-apps.yaml"
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+EOF
+}
+
 emit_app() {
   local name="$1" path="$2" namespace="$3" params_file="$4"
 
@@ -95,10 +129,17 @@ EOF
 # This repo is public (see docs/DECISIONS.md #10), so Argo CD clones it
 # over plain HTTPS with no registered credential needed.
 #
+# The "root" Application below watches this exact file, so re-applying it
+# by hand is a one-time bootstrap step -- every regeneration after that
+# (e.g. the CD pipeline bumping greeter's image tag) is picked up and
+# applied automatically, no further kubectl needed.
+#
 # Each Application below is independent -- a missing prerequisite in one
 # chart (see that chart's README) only leaves that Application
 # OutOfSync/Degraded, it doesn't block the others.
 HEADER
+
+  emit_root_app
 
   for category in central-services critical; do
     dir="${CHARTS_ROOT}/${category}"

@@ -13,6 +13,11 @@
 # This repo is public (see docs/DECISIONS.md #10), so Argo CD clones it
 # over plain HTTPS with no registered credential needed.
 #
+# The "root" Application below watches this exact file, so re-applying it
+# by hand is a one-time bootstrap step -- every regeneration after that
+# (e.g. the CD pipeline bumping greeter's image tag) is picked up and
+# applied automatically, no further kubectl needed.
+#
 # Each Application below is independent -- a missing prerequisite in one
 # chart (see that chart's README) only leaves that Application
 # OutOfSync/Degraded, it doesn't block the others.
@@ -20,7 +25,7 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: argocd-image-updater
+  name: root
   namespace: argocd
   finalizers:
     - resources-finalizer.argocd.argoproj.io
@@ -29,7 +34,30 @@ spec:
   source:
     repoURL: https://github.com/chayma1205/hivemind-challenge.git
     targetRevision: main
-    path: charts/env/prod/central-services/argocd-image-updater
+    path: charts/env/prod
+    directory:
+      include: "argocd-apps.yaml"
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: argocd
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/chayma1205/hivemind-challenge.git
+    targetRevision: main
+    path: charts/env/prod/central-services/argocd
     helm:
       valueFiles:
         - values.yaml
@@ -46,7 +74,7 @@ spec:
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: argocd
+  name: argocd-image-updater
   namespace: argocd
   finalizers:
     - resources-finalizer.argocd.argoproj.io
@@ -55,7 +83,7 @@ spec:
   source:
     repoURL: https://github.com/chayma1205/hivemind-challenge.git
     targetRevision: main
-    path: charts/env/prod/central-services/argocd
+    path: charts/env/prod/central-services/argocd-image-updater
     helm:
       valueFiles:
         - values.yaml
