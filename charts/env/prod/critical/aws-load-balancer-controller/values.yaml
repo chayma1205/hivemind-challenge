@@ -5,9 +5,8 @@ aws-load-balancer-controller:
   # Must match terraform var.cluster_name (terraform/envs/prod).
   clusterName: hivemind-prod
   region: us-east-1
-  # TODO: set to `terraform output vpc_id` from terraform/envs/prod, or
-  # leave unset to let the controller discover it from instance metadata.
-  vpcId: ""
+  # From terraform/envs/prod output `vpc_id`.
+  vpcId: "vpc-00978668ba2e018a8"
 
   ingressClass: alb
   createIngressClassResource: true
@@ -15,10 +14,10 @@ aws-load-balancer-controller:
   serviceAccount:
     create: true
     annotations:
-      # TODO: ARN of the IRSA role for the controller (needs the AWS-managed
-      # AWSLoadBalancerControllerIAMPolicy). Not yet provisioned in
-      # terraform/envs/prod — see README.
-      eks.amazonaws.com/role-arn: ""
+      # From terraform/envs/prod output
+      # `aws_load_balancer_controller_iam_role_arn`
+      # (module.aws_load_balancer_controller_irsa).
+      eks.amazonaws.com/role-arn: "arn:aws:iam::324464328617:role/hivemind-prod-aws-load-balancer-controller"
 
   replicaCount: 2
 

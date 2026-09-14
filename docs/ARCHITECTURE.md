@@ -101,29 +101,46 @@ Helm charts, split by role:
   scratch rather than wrapping an upstream chart. Deliberately does *not*
   tolerate the system node group's taint.
 
+## Current live state
+
+As of this writing, `hivemind-prod` is a real running cluster, not just
+Terraform code:
+
+* VPC/ECR/EKS: applied, including the `role=system` taint/label on the
+  node group.
+* IRSA for Karpenter's controller (+ node IAM role + interruption queue)
+  and the ALB controller: applied (`module.karpenter`,
+  `module.aws_load_balancer_controller_irsa` in
+  `terraform/envs/prod/main.tf`) and wired into both charts' `values.yaml`.
+* Argo CD: `helm install`ed and healthy, running on the system node group.
+* [`charts/env/prod/argocd-apps.yaml`](../charts/env/prod/argocd-apps.yaml):
+  applied — four `Application` resources exist in the `argocd` namespace.
+
 ## What isn't built yet
 
-This repo provisions the infrastructure (VPC/ECR/EKS) via Terraform and has
-Helm charts for the platform add-ons and the app itself, but several pieces
-aren't wired together yet:
-
+* **Argo CD has no repo access.** The Applications in `argocd-apps.yaml`
+  point at this repo, which is private — Argo CD needs a registered
+  credential (`argocd repo add ...` or a `repository`-labeled Secret, see
+  RUNBOOK step 5) before any of them can actually sync. This step involves
+  writing a GitHub token into the cluster, which needs to be done
+  deliberately rather than automated — see RUNBOOK for the exact command.
 * **No general-workload node capacity.** The only node group is reserved
-  for critical/central-services (see Compute, above). Karpenter is meant to
-  provide general capacity via its `NodePool` once it's running — but it
-  isn't yet, because:
-* **IRSA roles are missing** for Karpenter's controller and the ALB
-  controller (each chart's README documents exactly what's needed). Until
-  those exist, neither controller can actually do anything, and the
-  greeter app's pods have nowhere to schedule.
-* **Nothing is installed yet.** The charts exist and validate
-  (`helm template`/`helm lint`), but none have been `helm install`ed onto
-  the live cluster.
+  for critical/central-services (see Compute, above). Karpenter's IAM side
+  is wired up, but its `NodePool` still can't launch anything because:
+* **Karpenter's discovery tags are missing** — it finds subnets/security
+  groups by tag, and that tag isn't yet applied to the VPC module's
+  private subnets or the node security group in `terraform/envs/prod` (see
+  the karpenter chart's README).
 * The `HELLO_TAG` URL-parameter change to `app/greeter.go` itself (from the
   challenge README) hasn't been made.
-* A CI/CD pipeline (build → scan → push to ECR → `helm upgrade`, ideally
-  via the now-installed Argo CD rather than a push-based pipeline).
+* **No real greeter image.** `argocd-apps.yaml`'s `greeter` Application
+  pins `image.tag: "unset"` — nothing has been built and pushed yet (see
+  RUNBOOK step 4).
+* A CI/CD pipeline (build → scan → push to ECR → update `image.tag` in
+  `argocd-apps.yaml` → Argo CD syncs) — today that last step is a manual
+  file edit, not automated.
 * Observability stack (metrics, logs, alerting) beyond what EKS/CloudWatch
-  provide by default — note the app charts also can't autoscale on CPU yet
+  provide by default — note the app chart also can't autoscale on CPU yet
   since there's no metrics-server.
 
 These are called out explicitly (rather than hand-waved) so the current

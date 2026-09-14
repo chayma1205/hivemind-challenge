@@ -10,33 +10,36 @@ because it's cluster-scoped configuration tied to *this* environment's
 cluster name, subnets and node role — unlike Argo CD, which is installed
 once per cluster with no per-env values.
 
-## ⚠️ Prerequisites not yet provisioned
+## Prerequisites
 
-This chart alone is not enough to run Karpenter — the following need to
-exist first, none of which are in `terraform/envs/prod` yet:
+Provisioned by `terraform/envs/prod`'s `module.karpenter`
+(`terraform-aws-modules/eks/aws//modules/karpenter`, with `enable_irsa =
+true` since this module defaults to the newer Pod Identity mechanism, not
+classic IRSA) and wired into [`values.yaml`](values.yaml):
 
-1. **Controller IRSA role** — an IAM role Karpenter's pod assumes via its
-   service account, with permissions to create/terminate EC2 instances,
-   describe subnets/security groups, etc. Typically provisioned via
-   `terraform-aws-modules/eks/aws//modules/karpenter`. Once it exists, set
-   `karpenter.serviceAccount.annotations."eks.amazonaws.com/role-arn"` in
-   [`values.yaml`](values.yaml).
-2. **Node IAM role** — the role EC2 instances Karpenter launches will run
-   as (needs `AmazonEKSWorkerNodePolicy`, `AmazonEKS_CNI_Policy`,
-   `AmazonEC2ContainerRegistryReadOnly`, and an entry in the cluster's EKS
-   access entries / aws-auth). Set `nodePool.nodeRoleName` once it exists.
-3. **Discovery tags** — Karpenter finds subnets and the node security group
-   by tag (`karpenter.sh/discovery = hivemind-prod` by default
-   here). Add this tag to the VPC module's private subnets and to the EKS
-   node security group in `terraform/envs/prod`.
-4. **Interruption queue** (optional but recommended) — an SQS queue
-   receiving EC2 spot-interruption/rebalance events, referenced via
-   `karpenter.settings.interruptionQueue`. Only needed if using spot
-   capacity.
+1. **Controller IRSA role** — `karpenter.serviceAccount.annotations."eks.amazonaws.com/role-arn"`,
+   from the `karpenter_iam_role_arn` output.
+2. **Node IAM role** — `nodePool.nodeRoleName`, from `karpenter_node_iam_role_name`.
+   `iam_role_use_name_prefix`/`node_iam_role_use_name_prefix` are set to
+   `false` in Terraform so these names (and the hardcoded ARN above) stay
+   stable across applies instead of getting a random suffix each time the
+   role is replaced.
+3. **Interruption queue** — `karpenter.settings.interruptionQueue`, from
+   `karpenter_interruption_queue_name` (`enable_spot_termination = true`
+   provisions the SQS queue + EventBridge rules even though the default
+   `NodePool` only uses on-demand capacity — harmless, and one less thing
+   to wire up later if that changes).
 
-Each gap is marked `TODO` in [`values.yaml`](values.yaml). Until they're
-filled in, `helm install` will succeed (the chart is valid) but the
-controller pod will crash-loop on missing permissions / an empty node role.
+## ⚠️ One prerequisite still missing
+
+**Discovery tags** — Karpenter finds subnets and the node security group by
+tag (`karpenter.sh/discovery = hivemind-prod` by default here, see
+[`templates/nodeclass.yaml`](templates/nodeclass.yaml)). This tag isn't yet
+applied to the VPC module's private subnets or the EKS node security group
+in `terraform/envs/prod` — add it there before this chart's `NodePool` can
+actually launch anything. Until then, `helm install` succeeds and the
+controller runs, but any pod relying on Karpenter for capacity stays
+unschedulable.
 
 ## Install
 

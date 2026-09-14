@@ -65,3 +65,12 @@ helm upgrade --install greeter . \
 * `topologySpreadConstraints` spreads replicas across AZs
   (`ScheduleAnyway`, so it degrades gracefully rather than blocking
   scheduling outright under constrained capacity).
+* `podAntiAffinity` (separate from the AZ-level spread above) keeps
+  replicas off the same *node*. Defaults to `soft` (preferred) for the
+  same degrade-gracefully reason; set `podAntiAffinity.type=hard` for a
+  guaranteed one-replica-per-node placement once there's reliably enough
+  node capacity that "guaranteed" won't just mean "Pending".
+* Availability floor: `replicaCount: 2` plus `podDisruptionBudget.minAvailable: 1`
+  means a voluntary disruption (node drain, Karpenter consolidation, a
+  cluster upgrade) can only take one replica at a time — the other must
+  stay up for the eviction to be allowed.

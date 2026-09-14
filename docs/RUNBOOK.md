@@ -64,36 +64,66 @@ docker push "$ECR_URL:$TAG"
 Tags are immutable (see DECISIONS.md #8) — always push a new tag, never
 reuse an existing one.
 
-## 5. Deploy the app
+## 5. Bootstrap Argo CD and hand off to GitOps
 
-No Kubernetes manifests exist in this repo yet. Until they're added, deploy
-imperatively for verification:
+Install Argo CD itself once (see
+[`charts/env/prod/central-services/argocd/README.md`](../charts/env/prod/central-services/argocd/README.md)):
 
 ```bash
-kubectl create deployment greeter --image="$ECR_URL:$TAG" --port=8080
-kubectl set env deployment/greeter HELLO_TAG=<your-unique-tag>
-kubectl expose deployment greeter --type=LoadBalancer --port=80 --target-port=8080
-kubectl get svc greeter -w   # wait for EXTERNAL-IP, then curl it
+cd charts/env/prod/central-services/argocd
+helm dependency update
+helm upgrade --install argocd . --namespace argocd --create-namespace -f values.yaml
 ```
 
-Replace this with `kubectl apply -f k8s/` (or a Helm release) once real
-manifests land — imperative commands here are a stand-in, not the intended
-long-term deployment method.
+Register this repo with Argo CD (it's private — needs a GitHub PAT with
+`repo` scope):
+
+```bash
+kubectl -n argocd port-forward svc/argocd-server 8080:443 &
+argocd login localhost:8080 --username admin \
+  --password "$(kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d)"
+argocd repo add https://github.com/chayma1205/hivemind-challenge.git \
+  --username <gh-user> --password <gh-PAT>
+```
+
+Then hand every chart in this repo — including Argo CD's own install — to
+Argo CD to manage:
+
+```bash
+kubectl apply -n argocd -f charts/env/prod/argocd-apps.yaml
+```
+
+From this point, changing what's deployed means editing a chart's
+`values.yaml` (or, for the greeter image, the `helm.parameters` in
+[`argocd-apps.yaml`](../charts/env/prod/argocd-apps.yaml)), committing, and
+letting Argo CD's `automated: {prune: true, selfHeal: true}` sync policy
+apply it — not running `helm upgrade` by hand.
+
+The `karpenter` and `aws-load-balancer-controller` Applications will sync
+but their pods won't come up healthy until the IAM prerequisites in their
+respective READMEs are provisioned. The `greeter` Application needs a real
+image tag (step 4) — see the `TODO` in `argocd-apps.yaml`.
 
 ## 6. Change the `HELLO_TAG`
 
-```bash
-kubectl set env deployment/greeter HELLO_TAG=<new-tag>
-kubectl rollout status deployment/greeter
-```
+Edit the `env.HELLO_TAG` parameter in
+[`argocd-apps.yaml`](../charts/env/prod/argocd-apps.yaml), commit, and let
+Argo CD sync it — `selfHeal: true` means a manual `kubectl set env` gets
+reverted on the next sync. For a one-off manual check without going through
+git:
 
-This restarts pods with the new env var; no image rebuild required.
+```bash
+kubectl set env deployment/greeter HELLO_TAG=<new-tag> -n greeter
+kubectl rollout status deployment/greeter -n greeter
+```
 
 ## 7. Scale
 
-Pods:
+Pods: edit `replicaCount` in the greeter chart's `values.yaml` and let Argo
+CD sync it (a manual `kubectl scale` gets reverted by `selfHeal`), or for a
+one-off manual check:
 ```bash
-kubectl scale deployment/greeter --replicas=<n>
+kubectl scale deployment/greeter --replicas=<n> -n greeter
 ```
 
 Nodes (edit and re-apply, or override at apply time):
@@ -104,9 +134,14 @@ terraform apply -var="node_desired_size=<n>" -var="node_max_size=<n>"
 
 ## 8. Roll back a bad deployment
 
+Revert `image.tag` in `argocd-apps.yaml` to the previous known-good tag and
+let Argo CD sync — `selfHeal` will otherwise fight a plain
+`kubectl rollout undo` and restore the bad image on its next pass. For an
+immediate manual rollback while you prepare that commit:
+
 ```bash
-kubectl rollout undo deployment/greeter
-kubectl rollout status deployment/greeter
+kubectl rollout undo deployment/greeter -n greeter
+kubectl rollout status deployment/greeter -n greeter
 ```
 
 ## 9. Tear down

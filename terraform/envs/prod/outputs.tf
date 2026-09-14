@@ -38,3 +38,23 @@ output "configure_kubectl" {
   description = "Command to configure kubectl for this cluster."
   value       = "aws eks update-kubeconfig --region ${var.aws_region} --name ${module.eks.cluster_name} --profile ${var.aws_profile}"
 }
+
+output "karpenter_iam_role_arn" {
+  description = "IRSA role ARN for the Karpenter controller — set in the karpenter chart's serviceAccount.annotations."
+  value       = module.karpenter.iam_role_arn
+}
+
+output "karpenter_node_iam_role_name" {
+  description = "IAM role name Karpenter-launched EC2 nodes assume — set in the karpenter chart's nodePool.nodeRoleName."
+  value       = module.karpenter.node_iam_role_name
+}
+
+output "karpenter_interruption_queue_name" {
+  description = "SQS queue name for Karpenter spot interruption handling — set in the karpenter chart's settings.interruptionQueue."
+  value       = module.karpenter.queue_name
+}
+
+output "aws_load_balancer_controller_iam_role_arn" {
+  description = "IRSA role ARN for the AWS Load Balancer Controller — set in that chart's serviceAccount.annotations."
+  value       = module.aws_load_balancer_controller_irsa.iam_role_arn
+}

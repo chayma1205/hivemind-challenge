@@ -58,6 +58,17 @@ topologySpreadConstraints:
   maxSkew: 1
   whenUnsatisfiable: ScheduleAnyway
 
+# Keep replicas off the same node (distinct from topologySpreadConstraints
+# above, which is AZ-level and doesn't prevent two replicas sharing a
+# node). "soft" (preferred, default) avoids co-location without blocking
+# scheduling if capacity is tight; "hard" (required) guarantees it but can
+# leave replicas Pending if fewer schedulable nodes than replicas exist —
+# a real risk today since general workload capacity depends on Karpenter
+# being fully wired up (see README).
+podAntiAffinity:
+  enabled: true
+  type: soft
+
 # This is app workload, not a cluster-critical add-on, so it deliberately
 # does NOT set nodeSelector/tolerations for the `role=system` /
 # CriticalAddonsOnly-tainted node group (contrast with

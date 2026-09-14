@@ -7,16 +7,15 @@ karpenter:
     # Leave empty: Karpenter discovers the endpoint at startup on EKS.
     clusterEndpoint: ""
     eksControlPlane: true
-    # TODO: name of the SQS queue receiving EC2 interruption/rebalance
-    # events, once provisioned (see README's IAM/infra prerequisites).
-    interruptionQueue: ""
+    # From terraform/envs/prod output `karpenter_interruption_queue_name`
+    # (module.karpenter, terraform-aws-modules/eks/aws//modules/karpenter).
+    interruptionQueue: "Karpenter-hivemind-prod"
 
   serviceAccount:
     create: true
     annotations:
-      # TODO: ARN of the IRSA role for the Karpenter controller. Not yet
-      # provisioned in terraform/envs/prod — see README.
-      eks.amazonaws.com/role-arn: ""
+      # From terraform/envs/prod output `karpenter_iam_role_arn`.
+      eks.amazonaws.com/role-arn: "arn:aws:iam::324464328617:role/hivemind-prod-karpenter-controller"
 
   replicas: 2
 
@@ -43,9 +42,9 @@ karpenter:
 nodePool:
   # IAM role Karpenter-launched EC2 instances assume (NOT an instance
   # profile ARN — Karpenter creates the instance profile itself from this
-  # role name). TODO: the EKS managed node group's role, or a dedicated
-  # Karpenter node role, once provisioned in terraform/envs/prod.
-  nodeRoleName: ""
+  # role name). From terraform/envs/prod output
+  # `karpenter_node_iam_role_name`.
+  nodeRoleName: "hivemind-prod-karpenter-node"
   # Tags used to discover subnets/security groups for launched nodes.
   # TODO: apply the matching `karpenter.sh/discovery = <cluster-name>` tag
   # to the VPC's private subnets and the node security group in Terraform.
