@@ -58,6 +58,13 @@ argocd-image-updater:
   initContainers:
     - name: copy-aws-cli
       image: public.ecr.aws/aws-cli/aws-cli:2.31.13
+      # The pod-level securityContext (further down, from the chart)
+      # enforces runAsNonRoot, but this image only ships a root user —
+      # override it for just this container, which only reads its own
+      # image content and writes to an emptyDir, then exits.
+      securityContext:
+        runAsNonRoot: false
+        runAsUser: 0
       command:
         - sh
         - -c
