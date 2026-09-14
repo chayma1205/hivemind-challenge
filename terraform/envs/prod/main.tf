@@ -32,6 +32,9 @@ module "vpc" {
   private_subnet_tags = {
     "kubernetes.io/role/internal-elb"           = "1"
     "kubernetes.io/cluster/${var.cluster_name}" = "shared"
+    # Lets Karpenter discover subnets to launch nodes into — matches
+    # charts/env/prod/critical/karpenter's EC2NodeClass.subnetSelectorTerms.
+    "karpenter.sh/discovery" = var.cluster_name
   }
 
   tags = var.tags
@@ -99,6 +102,13 @@ module "eks" {
   # entries, so the cluster is usable immediately without manual aws-auth
   # edits.
   enable_cluster_creator_admin_permissions = true
+
+  # Lets Karpenter discover this security group for nodes it launches —
+  # matches charts/env/prod/critical/karpenter's
+  # EC2NodeClass.securityGroupSelectorTerms.
+  node_security_group_tags = {
+    "karpenter.sh/discovery" = var.cluster_name
+  }
 
   eks_managed_node_group_defaults = {
     ami_type       = "AL2023_x86_64_STANDARD"
@@ -174,6 +184,19 @@ module "karpenter" {
   node_iam_role_use_name_prefix = false
 
   enable_spot_termination = true
+
+  # iam:ListInstanceProfiles doesn't support resource-level scoping (must
+  # be Resource "*"), so the module's own scoped-to-instance-profile/*
+  # statements never cover it — its periodic instance-profile garbage
+  # collection controller 403s without this.
+  iam_policy_statements = [
+    {
+      sid       = "AllowInstanceProfileListAction"
+      effect    = "Allow"
+      actions   = ["iam:ListInstanceProfiles"]
+      resources = ["*"]
+    }
+  ]
 
   tags = var.tags
 }

@@ -19,9 +19,15 @@ spec:
         - key: karpenter.k8s.aws/instance-category
           operator: In
           values: {{ .Values.nodePool.instanceCategories | toYaml | nindent 12 }}
+        # Excludes legacy first/second-gen families (e.g. m1.small) that
+        # otherwise match instance-category but can't run the current EKS
+        # AMI / lack ENA networking — instances launch but never register.
+        - key: karpenter.k8s.aws/instance-generation
+          operator: Gt
+          values: ["2"]
+      expireAfter: {{ .Values.nodePool.expireAfter }}
   limits:
     cpu: {{ .Values.nodePool.limits.cpu | quote }}
   disruption:
     consolidationPolicy: {{ .Values.nodePool.consolidationPolicy }}
     consolidateAfter: {{ .Values.nodePool.consolidateAfter }}
-    expireAfter: {{ .Values.nodePool.expireAfter }}
