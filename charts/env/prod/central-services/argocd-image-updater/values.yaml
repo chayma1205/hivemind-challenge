@@ -8,6 +8,15 @@ argocd-image-updater:
   # since this repo's Applications already live as plain CRDs.
   createClusterRoles: true
 
+  # The AWS CLI (used by ecr-login.sh) tries to create ~/.aws even for a
+  # read-only call, which fails against this container's read-only root
+  # filesystem. /tmp is the one writable path already mounted (an emptyDir
+  # the chart provides), so point HOME there instead of adding another
+  # volume just for this.
+  extraEnv:
+    - name: HOME
+      value: /tmp
+
   serviceAccount:
     create: true
     annotations:
