@@ -20,7 +20,7 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: argocd
+  name: argocd-image-updater
   namespace: argocd
   finalizers:
     - resources-finalizer.argocd.argoproj.io
@@ -29,7 +29,7 @@ spec:
   source:
     repoURL: https://github.com/chayma1205/hivemind-challenge.git
     targetRevision: main
-    path: charts/env/prod/central-services/argocd
+    path: charts/env/prod/central-services/argocd-image-updater
     helm:
       valueFiles:
         - values.yaml
@@ -46,7 +46,7 @@ spec:
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: argocd-image-updater
+  name: argocd
   namespace: argocd
   finalizers:
     - resources-finalizer.argocd.argoproj.io
@@ -55,7 +55,7 @@ spec:
   source:
     repoURL: https://github.com/chayma1205/hivemind-challenge.git
     targetRevision: main
-    path: charts/env/prod/central-services/argocd-image-updater
+    path: charts/env/prod/central-services/argocd
     helm:
       valueFiles:
         - values.yaml
@@ -193,7 +193,7 @@ spec:
         - name: image.repository
           value: "324464328617.dkr.ecr.us-east-1.amazonaws.com/hivemind-greeter"
         - name: image.tag
-          value: "0834255"
+          value: "ea792b8"
         - name: env.HELLO_TAG
           value: "hivemind-prod"
   destination:
