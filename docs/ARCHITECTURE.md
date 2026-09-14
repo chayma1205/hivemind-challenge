@@ -75,9 +75,15 @@ the applying identity cluster-admin via EKS access entries for initial
 bootstrapping.
 
 This node group is labelled `role=system` and tainted
-`CriticalAddonsOnly=true:NoSchedule` — it's reserved for the
-critical/central-services charts below, not general app workload. See
-"What isn't built yet".
+`CriticalAddonsOnly=true:NoSchedule` — reserved for the critical/
+central-services charts, not general app workload. General workload
+capacity comes from Karpenter's `NodePool` instead (see the Kubernetes
+workloads section below), which provisions real nodes on demand.
+
+Core EKS addons (`vpc-cni`, `coredns`, `kube-proxy`) are managed via the
+module's `cluster_addons` block, pinned to specific versions rather than
+tracking "latest" implicitly — see the comment above that block for how to
+check current AWS-recommended versions before bumping.
 
 ### State & locking (`terraform/shared/terraform-backend/`)
 A separate bootstrap stack provisions the S3 bucket all other stacks use as
@@ -90,12 +96,14 @@ TLS-only bucket policy). Locking uses the S3 backend's native
 Helm charts, split by role:
 
 * [`critical/`](../charts/env/prod/critical) — cluster-critical add-ons
-  (Karpenter, the AWS Load Balancer Controller, metrics-server), each a
-  thin wrapper around an upstream chart. Scheduled onto the `role=system`
-  node group via matching `nodeSelector`/tolerations and
-  `priorityClassName: system-cluster-critical`.
-* [`central-services/`](../charts/env/prod/central-services) — Argo CD,
-  installed once for the cluster. Same node placement as `critical/`.
+  (Karpenter, the AWS Load Balancer Controller, metrics-server,
+  cert-manager), each a thin wrapper around an upstream chart. Scheduled
+  onto the `role=system` node group via matching
+  `nodeSelector`/tolerations and `priorityClassName:
+  system-cluster-critical`.
+* [`central-services/`](../charts/env/prod/central-services) — Argo CD and
+  Argo CD Image Updater, installed once for the cluster. Same node
+  placement as `critical/`.
 * [`apps/`](../charts/env/prod/apps) — actual application workloads (just
   [`greeter`](../charts/env/prod/apps/greeter) today), templated from
   scratch rather than wrapping an upstream chart. Deliberately does *not*
@@ -124,6 +132,11 @@ breaks, fix it" rather than only validated with `helm template`:
   (verified end-to-end with an actual HTTP request through the Service).
 * metrics-server: backs the greeter chart's HPA (`autoscaling.enabled:
   true`).
+* EKS addons (`vpc-cni`, `coredns`, `kube-proxy`): applied at pinned,
+  AWS-recommended versions for Kubernetes 1.36.
+* IRSA for cert-manager (Route53 DNS-01) and argocd-image-updater (ECR
+  read) provisioned; both charts exist but ClusterIssuer/image-update
+  write-back aren't configured yet — see their READMEs.
 
 Bugs found and fixed by actually running this (not just reading the specs):
 the community `terraform-aws-modules/eks/aws//modules/karpenter` module's
@@ -139,10 +152,18 @@ never register with the cluster.
 
 * The `HELLO_TAG` URL-parameter change to `app/greeter.go` itself (from the
   challenge README) hasn't been made.
-* A CI/CD pipeline (build → scan → push to ECR → update `image.tag` in
-  [`charts/env/prod/apps/greeter/argocd-params.env`](../charts/env/prod/apps/greeter/argocd-params.env)
-  → regenerate `argocd-apps.yaml` → Argo CD syncs) — today that whole
-  sequence is manual.
+* A CI pipeline that builds/scans/pushes on every commit doesn't exist —
+  images are still built and pushed by hand (RUNBOOK step 4).
+* Argo CD Image Updater is installed but not wired to actually update
+  anything yet: the `greeter` Application has no
+  `argocd-image-updater.argoproj.io/image-list` annotation telling it
+  which image to watch, so pushing a new tag to ECR today still means
+  manually editing
+  [`argocd-params.env`](../charts/env/prod/apps/greeter/argocd-params.env)
+  and regenerating `argocd-apps.yaml`.
+* No real domain — cert-manager's `ClusterIssuer` is disabled
+  ([`clusterIssuer.enabled: false`](../charts/env/prod/critical/cert-manager/values.yaml)),
+  and every chart's `ingress.enabled` stays `false` for the same reason.
 * Observability beyond metrics-server / EKS-CloudWatch defaults — no log
   aggregation, alerting, or dashboards.
 

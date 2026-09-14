@@ -75,19 +75,10 @@ helm dependency update
 helm upgrade --install argocd . --namespace argocd --create-namespace -f values.yaml
 ```
 
-Register this repo with Argo CD (it's private — needs a GitHub PAT with
-`repo` scope):
-
-```bash
-kubectl -n argocd port-forward svc/argocd-server 8080:443 &
-argocd login localhost:8080 --username admin \
-  --password "$(kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d)"
-argocd repo add https://github.com/chayma1205/hivemind-challenge.git \
-  --username <gh-user> --password <gh-PAT>
-```
-
-Then hand every chart in this repo — including Argo CD's own install — to
-Argo CD to manage:
+This repo is public (see [DECISIONS.md](DECISIONS.md#10-this-github-repo-is-public)),
+so Argo CD clones it over plain HTTPS with no registered credential — no
+`argocd login`/`argocd repo add` step needed. Hand every chart in this repo
+— including Argo CD's own install — to Argo CD to manage:
 
 ```bash
 kubectl apply -n argocd -f charts/env/prod/argocd-apps.yaml

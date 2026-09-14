@@ -1,0 +1,79 @@
+# Values passed through to the argocd-image-updater subchart (dependency
+# name: argocd-image-updater).
+# Full reference: https://github.com/argoproj/argo-helm/blob/argocd-image-updater-1.3.1/charts/argocd-image-updater/values.yaml
+argocd-image-updater:
+  # Runs in "kube" mode: reads/writes Argo CD Application CRDs directly via
+  # the Kubernetes API (createClusterRoles below) rather than calling the
+  # Argo CD API server — no argocd-server address/credentials to configure,
+  # since this repo's Applications already live as plain CRDs.
+  createClusterRoles: true
+
+  serviceAccount:
+    create: true
+    annotations:
+      # From terraform/envs/prod output `argocd_image_updater_iam_role_arn`.
+      eks.amazonaws.com/role-arn: "arn:aws:iam::324464328617:role/hivemind-prod-argocd-image-updater"
+
+  # Pin to the system node group (terraform/envs/prod's
+  # eks_managed_node_groups.default: labels role=system, taint
+  # CriticalAddonsOnly=true:NoSchedule).
+  nodeSelector:
+    role: system
+  tolerations:
+    - key: CriticalAddonsOnly
+      operator: Equal
+      value: "true"
+      effect: NoSchedule
+
+  config:
+    registries:
+      - name: ECR
+        api_url: https://324464328617.dkr.ecr.us-east-1.amazonaws.com
+        prefix: 324464328617.dkr.ecr.us-east-1.amazonaws.com
+        ping: true
+        credentials: ext:/scripts/ecr-login.sh
+        # ECR tokens are valid 12h; refresh with margin to spare.
+        credsexpire: 10h
+
+  # ECR needs a per-call `aws ecr get-login-password` — see the "How ECR
+  # authentication actually works" section in README.md for why this
+  # can't just be "omit credentials, IRSA handles it automatically".
+  authScripts:
+    enabled: true
+    scripts:
+      ecr-login.sh: |
+        #!/bin/sh
+        set -e
+        TOKEN=$(aws ecr get-login-password --region us-east-1)
+        printf 'AWS:%s' "$TOKEN"
+
+  # The default image has no AWS CLI, and ECR auth needs one (see README).
+  # This copies a real `aws` binary from the official CLI image into a
+  # shared emptyDir at container start, then mounts it into the main
+  # container — no custom image build required.
+  volumes:
+    - name: aws-cli
+      emptyDir: {}
+
+  initContainers:
+    - name: copy-aws-cli
+      image: public.ecr.aws/aws-cli/aws-cli:2.31.13
+      command:
+        - sh
+        - -c
+        - |
+          set -e
+          mkdir -p /shared
+          cp -r /usr/local/aws-cli /shared/aws-cli
+          cp -a /usr/local/bin/aws /shared/aws
+      volumeMounts:
+        - name: aws-cli
+          mountPath: /shared
+
+  volumeMounts:
+    - name: aws-cli
+      mountPath: /usr/local/aws-cli
+      subPath: aws-cli
+    - name: aws-cli
+      mountPath: /usr/local/bin/aws
+      subPath: aws

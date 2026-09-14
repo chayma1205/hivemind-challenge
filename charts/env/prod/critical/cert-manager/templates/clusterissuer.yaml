@@ -1,0 +1,16 @@
+{{- if .Values.clusterIssuer.enabled }}
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: {{ .Values.clusterIssuer.name }}
+spec:
+  acme:
+    server: {{ .Values.clusterIssuer.server }}
+    email: {{ required "clusterIssuer.email is required when clusterIssuer.enabled" .Values.clusterIssuer.email }}
+    privateKeySecretRef:
+      name: {{ .Values.clusterIssuer.name }}-account-key
+    solvers:
+      - dns01:
+          route53:
+            region: {{ .Values.clusterIssuer.region }}
+{{- end }}

@@ -1,0 +1,11 @@
+apiVersion: v2
+name: cert-manager
+description: Provisions cert-manager for the prod EKS cluster (Route53 DNS-01 solver via IRSA)
+type: application
+version: 0.1.0
+appVersion: "v1.21.2"
+
+dependencies:
+  - name: cert-manager
+    version: "v1.21.2"
+    repository: https://charts.jetstack.io

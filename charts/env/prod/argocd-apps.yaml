@@ -10,11 +10,8 @@
 #
 #   kubectl apply -n argocd -f charts/env/prod/argocd-apps.yaml
 #
-# Prerequisite: Argo CD needs read access to this repo (it's private).
-# Register it once, e.g.:
-#
-#   argocd repo add https://github.com/chayma1205/hivemind-challenge.git \
-#     --username <gh-user> --password <gh-PAT-with-repo-scope>
+# This repo is public (see docs/DECISIONS.md #10), so Argo CD clones it
+# over plain HTTPS with no registered credential needed.
 #
 # Each Application below is independent -- a missing prerequisite in one
 # chart (see that chart's README) only leaves that Application
@@ -49,6 +46,32 @@ spec:
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
+  name: argocd-image-updater
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/chayma1205/hivemind-challenge.git
+    targetRevision: main
+    path: charts/env/prod/central-services/argocd-image-updater
+    helm:
+      valueFiles:
+        - values.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
   name: aws-load-balancer-controller
   namespace: argocd
   finalizers:
@@ -65,6 +88,32 @@ spec:
   destination:
     server: https://kubernetes.default.svc
     namespace: kube-system
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cert-manager
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/chayma1205/hivemind-challenge.git
+    targetRevision: main
+    path: charts/env/prod/critical/cert-manager
+    helm:
+      valueFiles:
+        - values.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: cert-manager
   syncPolicy:
     automated:
       prune: true

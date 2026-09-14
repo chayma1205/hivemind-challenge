@@ -1,0 +1,71 @@
+# Values passed through to the cert-manager subchart (dependency name:
+# cert-manager).
+# Full reference: https://github.com/cert-manager/cert-manager/blob/v1.21.2/deploy/charts/cert-manager/values.yaml
+cert-manager:
+  # Renders CRDs as regular templates instead of Helm's special crds/
+  # directory, which `helm template` (and so Argo CD) never applies.
+  crds:
+    enabled: true
+
+  replicaCount: 2
+
+  serviceAccount:
+    create: true
+    annotations:
+      # From terraform/envs/prod output `cert_manager_iam_role_arn`
+      # (module.cert_manager_irsa). Only the controller needs this — the
+      # webhook/cainjector/startupapicheck never call AWS APIs.
+      eks.amazonaws.com/role-arn: "arn:aws:iam::324464328617:role/hivemind-prod-cert-manager"
+
+  # Pin every component to the system node group (terraform/envs/prod's
+  # eks_managed_node_groups.default: labels role=system, taint
+  # CriticalAddonsOnly=true:NoSchedule).
+  nodeSelector:
+    role: system
+  tolerations:
+    - key: CriticalAddonsOnly
+      operator: Equal
+      value: "true"
+      effect: NoSchedule
+
+  webhook:
+    replicaCount: 2
+    nodeSelector:
+      role: system
+    tolerations:
+      - key: CriticalAddonsOnly
+        operator: Equal
+        value: "true"
+        effect: NoSchedule
+
+  cainjector:
+    replicaCount: 2
+    nodeSelector:
+      role: system
+    tolerations:
+      - key: CriticalAddonsOnly
+        operator: Equal
+        value: "true"
+        effect: NoSchedule
+
+  startupapicheck:
+    nodeSelector:
+      role: system
+    tolerations:
+      - key: CriticalAddonsOnly
+        operator: Equal
+        value: "true"
+        effect: NoSchedule
+
+# Values for this chart's own templates (ClusterIssuer), not the
+# cert-manager subchart.
+clusterIssuer:
+  # Disabled until there's a real domain — a Route53 DNS-01 issuer needs
+  # somewhere to actually create validation records.
+  enabled: false
+  name: letsencrypt-prod
+  # TODO: a real contact address; Let's Encrypt uses this for expiry/abuse
+  # notices, it's not used for anything user-facing.
+  email: ""
+  region: us-east-1
+  server: https://acme-v02.api.letsencrypt.org/directory

@@ -10,6 +10,12 @@ set -euo pipefail
 # are picked up from an optional <chart-dir>/argocd-params.env file --
 # simple KEY=VALUE lines, one per Helm parameter path.
 #
+# Namespace defaults per category (below), but a chart whose install
+# namespace doesn't match its category's default (e.g. cert-manager,
+# which needs its own namespace to match its IRSA trust policy rather
+# than critical/'s kube-system default) can override it with a one-line
+# <chart-dir>/argocd-namespace file.
+#
 # Usage: scripts/generate-argocd-apps.sh
 # Env overrides: REPO_URL, TARGET_REVISION, OUTPUT_FILE
 
@@ -86,11 +92,8 @@ EOF
 #
 #   kubectl apply -n argocd -f charts/env/prod/argocd-apps.yaml
 #
-# Prerequisite: Argo CD needs read access to this repo (it's private).
-# Register it once, e.g.:
-#
-#   argocd repo add ${REPO_URL} \\
-#     --username <gh-user> --password <gh-PAT-with-repo-scope>
+# This repo is public (see docs/DECISIONS.md #10), so Argo CD clones it
+# over plain HTTPS with no registered credential needed.
 #
 # Each Application below is independent -- a missing prerequisite in one
 # chart (see that chart's README) only leaves that Application
@@ -103,8 +106,10 @@ HEADER
     for chart_dir in "${dir}"/*/; do
       [[ -f "${chart_dir}/Chart.yaml" ]] || continue
       name="$(basename "${chart_dir}")"
+      namespace="${CATEGORY_NAMESPACE[${category}]}"
+      [[ -f "${chart_dir}argocd-namespace" ]] && namespace="$(<"${chart_dir}argocd-namespace")"
       emit_app "${name}" "charts/env/prod/${category}/${name}" \
-        "${CATEGORY_NAMESPACE[${category}]}" "${chart_dir}argocd-params.env"
+        "${namespace}" "${chart_dir}argocd-params.env"
     done
   done
 

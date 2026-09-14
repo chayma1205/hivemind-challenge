@@ -103,6 +103,25 @@ module "eks" {
   # edits.
   enable_cluster_creator_admin_permissions = true
 
+  # Pinned to the AWS-recommended default version for cluster_version
+  # (1.36) as of this writing — check
+  # `aws eks describe-addon-versions --addon-name <name> --kubernetes-version 1.36`
+  # before bumping, rather than tracking "latest" implicitly.
+  cluster_addons = {
+    vpc-cni = {
+      addon_version               = "v1.22.4-eksbuild.3"
+      resolve_conflicts_on_update = "OVERWRITE"
+    }
+    coredns = {
+      addon_version               = "v1.14.3-eksbuild.16"
+      resolve_conflicts_on_update = "OVERWRITE"
+    }
+    kube-proxy = {
+      addon_version               = "v1.36.0-eksbuild.21"
+      resolve_conflicts_on_update = "OVERWRITE"
+    }
+  }
+
   # Lets Karpenter discover this security group for nodes it launches —
   # matches charts/env/prod/critical/karpenter's
   # EC2NodeClass.securityGroupSelectorTerms.
@@ -224,4 +243,55 @@ module "aws_load_balancer_controller_irsa" {
   }
 
   tags = var.tags
+}
+
+# IRSA for cert-manager's Route53 DNS-01 solver. Fills the prerequisite
+# documented in charts/env/prod/critical/cert-manager/values.yaml — that
+# chart's serviceAccount.annotations should be set to this module's
+# iam_role_arn output.
+module "cert_manager_irsa" {
+  source  = "terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts-eks"
+  version = "~> 5.39"
+
+  role_name = "${var.cluster_name}-cert-manager"
+
+  attach_cert_manager_policy = true
+  # TODO: narrow to the specific hosted zone ARN once a real domain/Route53
+  # hosted zone exists; left at the module's own default (all hosted zones
+  # in the account) since none exists yet.
+
+  oidc_providers = {
+    main = {
+      provider_arn               = module.eks.oidc_provider_arn
+      namespace_service_accounts = ["cert-manager:cert-manager"]
+    }
+  }
+
+  tags = var.tags
+}
+
+# IRSA for argocd-image-updater (ECR read access to detect new image tags).
+# Fills the prerequisite documented in
+# charts/env/prod/central-services/argocd-image-updater/values.yaml.
+module "argocd_image_updater_irsa" {
+  source  = "terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts-eks"
+  version = "~> 5.39"
+
+  role_name = "${var.cluster_name}-argocd-image-updater"
+
+  oidc_providers = {
+    main = {
+      provider_arn               = module.eks.oidc_provider_arn
+      namespace_service_accounts = ["argocd:argocd-image-updater"]
+    }
+  }
+
+  tags = var.tags
+}
+
+# No attach_* flag exists for plain ECR read access in the module, so
+# attach the AWS managed policy directly.
+resource "aws_iam_role_policy_attachment" "argocd_image_updater_ecr_read" {
+  role       = module.argocd_image_updater_irsa.iam_role_name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
 }

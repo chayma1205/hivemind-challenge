@@ -58,3 +58,13 @@ output "aws_load_balancer_controller_iam_role_arn" {
   description = "IRSA role ARN for the AWS Load Balancer Controller — set in that chart's serviceAccount.annotations."
   value       = module.aws_load_balancer_controller_irsa.iam_role_arn
 }
+
+output "cert_manager_iam_role_arn" {
+  description = "IRSA role ARN for cert-manager's Route53 DNS-01 solver — set in that chart's serviceAccount.annotations."
+  value       = module.cert_manager_irsa.iam_role_arn
+}
+
+output "argocd_image_updater_iam_role_arn" {
+  description = "IRSA role ARN for argocd-image-updater's ECR read access — set in that chart's serviceAccount.annotations."
+  value       = module.argocd_image_updater_irsa.iam_role_arn
+}
