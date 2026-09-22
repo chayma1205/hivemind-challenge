@@ -12,6 +12,7 @@ metadata:
     # enabling" step in README.md — see
     # templates/deploymentruntimeconfig.yaml's sync-wave comment for why.
     argocd.argoproj.io/sync-wave: "2"
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
 spec:
   credentials:
     source: PodIdentity

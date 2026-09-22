@@ -4,20 +4,29 @@
 # Provider.spec.runtimeConfigRef's own default, so the auto-created
 # Provider object picks this up with no explicit reference needed.
 #
-# sync-wave: this CRD is registered by Crossplane core itself at pod
-# startup, not bundled as a CRD manifest in this chart or the subchart —
-# it doesn't exist until the crossplane Deployment (wave 0, implicit) has
-# actually started and become Healthy. Applying it in the same wave as
-# first install races the CRD registration and fails with "the server
-# could not find the requested resource" (confirmed against a real first
-# sync). Argo CD waits for each wave to be Synced+Healthy before starting
-# the next, so wave 1 is enough — no fixed delay needed.
+# This CRD is registered by Crossplane core itself at pod startup, not
+# bundled as a CRD manifest in this chart or the subchart — it doesn't
+# exist until the crossplane Deployment has actually started.
+#
+# sync-wave "1" alone isn't enough on first install: confirmed against a
+# real first sync that Argo CD validates every resource's GVK is
+# discoverable *before* wave sequencing even starts, and aborts the whole
+# sync (nothing applies, not even wave-0 resources) if any one of them
+# can't be discovered yet — "failed to discover server resources for
+# group version pkg.crossplane.io/v1beta1: the server could not find the
+# requested resource", retried 5 times, nothing else in the sync ever
+# applied. SkipDryRunOnMissingResource=true tells Argo CD to skip that
+# resource's dry-run/discovery check instead of failing the batch when
+# its CRD is missing — it just gets retried on a later sync once
+# Crossplane has registered the CRD. sync-wave stays too, so once the CRD
+# does exist, this still waits for crossplane core to be Healthy first.
 apiVersion: pkg.crossplane.io/v1beta1
 kind: DeploymentRuntimeConfig
 metadata:
   name: {{ .Values.runtimeConfig.name }}
   annotations:
     argocd.argoproj.io/sync-wave: "1"
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
 spec:
   serviceAccountTemplate:
     metadata:
