@@ -32,9 +32,25 @@ spec:
     metadata:
       name: {{ .Values.runtimeConfig.serviceAccountName }}
   deploymentTemplate:
+    # `selector` and `template.spec.containers` are structurally required
+    # by this CRD's schema (it's typed as a full apps/v1 DeploymentSpec),
+    # even though Crossplane only merges this as a *patch* onto the real
+    # generated Deployment rather than applying it directly — confirmed
+    # live: without these, the apply silently failed schema validation
+    # ("spec.deploymentTemplate.spec.template.spec.containers: Required
+    # value, spec.deploymentTemplate.spec.selector: Required value"), and
+    # Argo CD kept retrying against an empty `spec: {}` object with no
+    # visible error short of reading the sync operation's raw result.
+    # `package-runtime` is the actual container name Crossplane's package
+    # manager uses for every provider pod (confirmed against a live pod
+    # spec) — this entry doesn't set anything on it, it exists only to
+    # satisfy the schema's `minItems`/`required name` on the array.
     spec:
+      selector: {}
       template:
         spec:
+          containers:
+            - name: package-runtime
           nodeSelector:
             role: system
           tolerations:
