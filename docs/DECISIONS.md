@@ -88,6 +88,13 @@ production environment this should be restricted via
 behind a VPN/bastion/Session Manager — called out in the prod stack's
 README as a known gap rather than silently accepted.
 
+**Revisited (2026-09-22):** `cluster_endpoint_public_access_cidrs` is now
+set, restricting the public endpoint to the operator's IP rather than
+`0.0.0.0/0`. Still a static single-IP allowlist, not a VPN/bastion — worth
+revisiting again if more than one operator ever needs access, since the
+CIDR has no mechanism to stay current on its own (see the `TODO` next to
+it in `variables.tf`).
+
 ## 7. Region `us-east-1`, AWS profile `hivemind`
 
 **Context:** Needed a concrete region/credentials story for a runnable

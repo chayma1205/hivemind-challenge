@@ -1,7 +1,9 @@
 # greeter (env/prod/apps)
 
-The actual Helm chart for Hivemind's greeter service
-([`app/greeter.go`](../../../../app/greeter.go)) — a `Deployment`, `Service`,
+The actual Helm chart for Hivemind's greeter service (source lives in a
+separate repo,
+[`hivemind-greeter`](https://github.com/chayma1205/hivemind-greeter)) —
+a `Deployment`, `Service`,
 optional `Ingress` (ALB), optional `HorizontalPodAutoscaler`, and a
 `PodDisruptionBudget`. Unlike the charts under `critical/` and
 `central-services/`, this one isn't a wrapper around an upstream chart —
@@ -54,11 +56,13 @@ helm upgrade --install greeter . \
 ## Notes
 
 * `HELLO_TAG` is read from the environment at *request* time (see
-  `app/greeter.go`), so changing it is a `kubectl set env` / values change
-  + rollout — no rebuild needed.
-* `ingress.enabled` defaults to `false` for the same reason as the other
-  charts' ingress: it needs the ALB controller and a real domain/ACM
-  certificate first.
+  `greeter.go` in the `hivemind-greeter` repo), so changing it is a
+  `kubectl set env` / values change + rollout — no rebuild needed.
+* `ingress.enabled` is `true` — the ALB controller and the real domain
+  both exist now. `certificate-arn` is still a TODO placeholder pending
+  the Crossplane cert migration (see `docs/ARCHITECTURE.md`); until it's
+  filled in, HTTPS rides on whatever cert the ALB controller's automatic
+  by-hostname discovery finds in ACM.
 * `autoscaling.enabled` defaults to `true`, backed by the `metrics-server`
   EKS addon (`terraform/envs/prod/main.tf`'s `module.eks.cluster_addons`).
   If the HPA reports `unable to fetch metrics from resource metrics API`,
