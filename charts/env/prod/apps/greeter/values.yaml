@@ -58,6 +58,23 @@ autoscaling:
   maxReplicas: 6
   targetCPUUtilizationPercentage: 70
 
+# Right-sizing recommendations (not enforcement) for this Deployment's
+# resource requests/limits. Requires
+# charts/env/prod/critical/vertical-pod-autoscaler to be installed —
+# see that chart's README for why it isn't.
+verticalPodAutoscaler:
+  enabled: true
+  # "Off": recommendation-only, never evicts or mutates a pod. Stays Off
+  # deliberately — autoscaling.enabled above is a CPU-based HPA, and an
+  # *active* VPA (Auto/Initial/Recreate) on the same metric for the same
+  # workload is a well-known anti-pattern (the two controllers can fight
+  # each other). Read recommendations with:
+  #   kubectl describe vpa greeter -n greeter
+  # and adjust `resources` above by hand once they've had time to settle
+  # — switching this to "Auto" is a deliberate later decision, not a
+  # default to flip casually.
+  updateMode: "Off"
+
 podDisruptionBudget:
   enabled: true
   minAvailable: 1

@@ -11,6 +11,17 @@ karpenter:
     # (module.karpenter, terraform-aws-modules/eks/aws//modules/karpenter).
     interruptionQueue: "Karpenter-hivemind-prod"
 
+    # ALPHA feature, off by default in the chart. Without it, a node whose
+    # kubelet stops posting status (Ready: Unknown) just sits there
+    # forever — confirmed live: one did, for ~3 hours, until manually
+    # cleaned up (`kubectl delete nodeclaim`). With it, Karpenter's own
+    # RepairPolicies (pkg/cloudprovider/cloudprovider.go in
+    # karpenter-provider-aws) terminate and replace a node after
+    # Ready=False/Unknown for 30 minutes — no alerting/paging required,
+    # just stops a dead node from sitting there indefinitely.
+    featureGates:
+      nodeRepair: true
+
   serviceAccount:
     create: true
     annotations:

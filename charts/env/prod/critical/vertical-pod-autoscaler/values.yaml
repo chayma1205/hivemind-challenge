@@ -1,0 +1,75 @@
+# Values passed through to the vertical-pod-autoscaler subchart
+# (dependency name: vertical-pod-autoscaler).
+# Full reference: https://github.com/cowboysysop/charts/blob/vertical-pod-autoscaler-11.1.1/charts/vertical-pod-autoscaler/values.yaml
+vertical-pod-autoscaler:
+  # Bundles the CRDs (VerticalPodAutoscaler, VerticalPodAutoscalerCheckpoint)
+  # as a Helm-managed Job/ConfigMap rather than the special crds/
+  # directory Argo CD's Helm rendering would otherwise skip — no separate
+  # `kubectl apply -f crds/` step needed. Nothing in this cluster had
+  # these CRDs before this chart.
+  crds:
+    enabled: true
+    nodeSelector:
+      role: system
+    tolerations:
+      - key: CriticalAddonsOnly
+        operator: Equal
+        value: "true"
+        effect: NoSchedule
+
+  # Generates recommendations for every VerticalPodAutoscaler object in
+  # the cluster (e.g. charts/env/prod/apps/greeter's, once enabled).
+  recommender:
+    replicaCount: 1
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        memory: 256Mi
+    nodeSelector:
+      role: system
+    tolerations:
+      - key: CriticalAddonsOnly
+        operator: Equal
+        value: "true"
+        effect: NoSchedule
+
+  # Evicts/resizes pods for any VPA in Auto/Recreate mode. Harmless to
+  # leave running even though greeter's VPA starts in updateMode: "Off"
+  # (recommendation-only, see that chart's values.yaml) — it just won't
+  # act on anything until a VPA opts into an active mode.
+  updater:
+    replicaCount: 1
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        memory: 256Mi
+    nodeSelector:
+      role: system
+    tolerations:
+      - key: CriticalAddonsOnly
+        operator: Equal
+        value: "true"
+        effect: NoSchedule
+
+  # Mutates new pods' resource requests/limits to match a VPA's live
+  # recommendation, for any VPA in Auto/Initial/Recreate mode. Same
+  # "harmless while nothing uses it yet" reasoning as updater above.
+  admissionController:
+    replicaCount: 2
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        memory: 256Mi
+    nodeSelector:
+      role: system
+    tolerations:
+      - key: CriticalAddonsOnly
+        operator: Equal
+        value: "true"
+        effect: NoSchedule

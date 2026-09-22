@@ -1,0 +1,30 @@
+{{- if .Values.verticalPodAutoscaler.enabled }}
+# Recommendation-only right-sizing for this Deployment's resource
+# requests/limits — see values.yaml for why updateMode stays "Off"
+# (greeter already has a CPU-based HPA; an *active* VPA on the same
+# metric is a well-known anti-pattern, see
+# charts/env/prod/critical/vertical-pod-autoscaler/README.md).
+# Requires charts/env/prod/critical/vertical-pod-autoscaler to be
+# installed first (its CRD, its recommender).
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: {{ include "greeter.fullname" . }}
+  labels:
+    {{- include "greeter.labels" . | nindent 4 }}
+  annotations:
+    # This resource's CRD lives in a *different* Argo CD Application
+    # (critical/vertical-pod-autoscaler) with no guaranteed sync order
+    # relative to this one — same first-sync race already hit and fixed
+    # for Crossplane (see that chart's templates/*.yaml comments). Skips
+    # this resource's dry-run instead of failing the whole sync if the
+    # CRD isn't registered yet; retries on the next sync once it is.
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "greeter.fullname" . }}
+  updatePolicy:
+    updateMode: {{ .Values.verticalPodAutoscaler.updateMode | quote }}
+{{- end }}
