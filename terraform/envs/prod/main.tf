@@ -246,6 +246,25 @@ module "eks" {
     "karpenter.sh/discovery" = var.cluster_name
   }
 
+  # The module's default node security group rules cover the control
+  # plane's usual webhook ports (443/4443/6443/8443/9443) and kubelet
+  # (10250), but not metrics-server's own aggregated-API port (10251) —
+  # confirmed live: the v1beta1.metrics.k8s.io APIService couldn't
+  # register (control plane timed out connecting to the metrics-server
+  # pod on 10251), which cascaded into every HPA reporting
+  # `<unknown>` targets and, from there, into Argo CD marking any
+  # Application with an HPA (argocd itself, greeter) as Degraded.
+  node_security_group_additional_rules = {
+    ingress_cluster_metrics_server = {
+      description                   = "Cluster API to node metrics-server webhook/aggregated API"
+      protocol                      = "tcp"
+      from_port                     = 10251
+      to_port                       = 10251
+      type                          = "ingress"
+      source_cluster_security_group = true
+    }
+  }
+
   eks_managed_node_group_defaults = {
     ami_type       = "AL2023_x86_64_STANDARD"
     instance_types = var.node_instance_types
