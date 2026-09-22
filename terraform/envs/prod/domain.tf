@@ -59,8 +59,16 @@ resource "aws_iam_role_policy" "external_dns" {
 }
 
 resource "aws_eks_pod_identity_association" "external_dns" {
-  cluster_name    = module.eks.cluster_name
-  namespace       = "kube-system"
+  cluster_name = module.eks.cluster_name
+  # NOT kube-system — the addon deploys into its own "external-dns"
+  # namespace. Got this wrong on the first pass: the association silently
+  # never matched, so the pod fell back to the node IAM role (no Route53
+  # permissions at all) instead of erroring — confirmed live via
+  # `kubectl logs`: "AccessDenied ... assumed-role/<node-group-role> ...
+  # not authorized to perform: route53:ListHostedZones", and
+  # `kubectl get pod -o jsonpath='{.metadata.namespace}'` showing
+  # "external-dns", not "kube-system".
+  namespace       = "external-dns"
   service_account = "external-dns"
   role_arn        = aws_iam_role.external_dns.arn
 
