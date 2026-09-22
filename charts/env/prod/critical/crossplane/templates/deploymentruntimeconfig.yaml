@@ -1,0 +1,24 @@
+# Pins the AWS family provider's pod (installed via
+# crossplane.provider.packages in values.yaml) to a fixed ServiceAccount
+# name and the system node group. Named "default" to match
+# Provider.spec.runtimeConfigRef's own default, so the auto-created
+# Provider object picks this up with no explicit reference needed.
+apiVersion: pkg.crossplane.io/v1beta1
+kind: DeploymentRuntimeConfig
+metadata:
+  name: {{ .Values.runtimeConfig.name }}
+spec:
+  serviceAccountTemplate:
+    metadata:
+      name: {{ .Values.runtimeConfig.serviceAccountName }}
+  deploymentTemplate:
+    spec:
+      template:
+        spec:
+          nodeSelector:
+            role: system
+          tolerations:
+            - key: CriticalAddonsOnly
+              operator: Equal
+              value: "true"
+              effect: NoSchedule

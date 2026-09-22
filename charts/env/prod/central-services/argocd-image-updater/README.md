@@ -10,13 +10,27 @@ Lives under `charts/env/prod/central-services/` alongside
 [`../argocd`](../argocd) — like Argo CD itself, it's a control-plane
 component installed once per cluster, not scoped to one app or environment.
 
-## Prerequisite
+## Prerequisites
 
-Needs an **IRSA role** with ECR read access
-(`AmazonEC2ContainerRegistryReadOnly`) to check tags and pull manifests.
-Provisioned in `terraform/envs/prod` by `module.argocd_image_updater_irsa`,
-wired into `serviceAccount.annotations."eks.amazonaws.com/role-arn"` in
-[`values.yaml`](values.yaml) from that module's `iam_role_arn` output.
+* An **IRSA role** with ECR read access
+  (`AmazonEC2ContainerRegistryReadOnly`) to check tags and pull manifests.
+  Provisioned in `terraform/envs/prod` by `module.argocd_image_updater_irsa`,
+  wired into `serviceAccount.annotations."eks.amazonaws.com/role-arn"` in
+  [`values.yaml`](values.yaml) from that module's `iam_role_arn` output.
+* A **git write credential** for [`templates/imageupdater.yaml`](templates/imageupdater.yaml)'s
+  write-back: an SSH deploy key with **write** access to this repo
+  (different from — and in addition to — the read-only key Argo CD's
+  repo-server uses to clone/sync; see
+  [`../argocd/README.md`](../argocd/README.md#repository-access-private-repo)),
+  stored as a `Secret` named `argocd-image-updater-git-creds` in the
+  `argocd` namespace:
+  ```bash
+  kubectl -n argocd create secret generic argocd-image-updater-git-creds \
+    --from-literal=sshPrivateKey="$(cat /path/to/write_key)"
+  ```
+  Same one-time manual bootstrap step as the repo-server credential, and
+  for the same reason (see docs/DECISIONS.md #10) — not something this
+  chart or an automated pipeline creates for you.
 
 ## How ECR authentication actually works here
 

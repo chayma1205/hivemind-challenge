@@ -10,8 +10,9 @@
 #
 #   kubectl apply -n argocd -f charts/env/prod/argocd-apps.yaml
 #
-# This repo is public (see docs/DECISIONS.md #10), so Argo CD clones it
-# over plain HTTPS with no registered credential needed.
+# This repo is private (see docs/DECISIONS.md #10), so Argo CD clones it
+# over SSH using a registered deploy-key credential — see
+# charts/env/prod/central-services/argocd/README.md.
 #
 # The "root" Application below watches this exact file, so re-applying it
 # by hand is a one-time bootstrap step -- every regeneration after that
@@ -32,7 +33,7 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://github.com/chayma1205/hivemind-challenge.git
+    repoURL: git@github.com:chayma1205/hivemind-challenge.git
     targetRevision: main
     path: charts/env/prod
     directory:
@@ -48,16 +49,16 @@ spec:
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: argocd
+  name: argocd-image-updater
   namespace: argocd
   finalizers:
     - resources-finalizer.argocd.argoproj.io
 spec:
   project: default
   source:
-    repoURL: https://github.com/chayma1205/hivemind-challenge.git
+    repoURL: git@github.com:chayma1205/hivemind-challenge.git
     targetRevision: main
-    path: charts/env/prod/central-services/argocd
+    path: charts/env/prod/central-services/argocd-image-updater
     helm:
       valueFiles:
         - values.yaml
@@ -74,16 +75,16 @@ spec:
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: argocd-image-updater
+  name: argocd
   namespace: argocd
   finalizers:
     - resources-finalizer.argocd.argoproj.io
 spec:
   project: default
   source:
-    repoURL: https://github.com/chayma1205/hivemind-challenge.git
+    repoURL: git@github.com:chayma1205/hivemind-challenge.git
     targetRevision: main
-    path: charts/env/prod/central-services/argocd-image-updater
+    path: charts/env/prod/central-services/argocd
     helm:
       valueFiles:
         - values.yaml
@@ -107,7 +108,7 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://github.com/chayma1205/hivemind-challenge.git
+    repoURL: git@github.com:chayma1205/hivemind-challenge.git
     targetRevision: main
     path: charts/env/prod/critical/aws-load-balancer-controller
     helm:
@@ -126,22 +127,22 @@ spec:
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: cert-manager
+  name: crossplane
   namespace: argocd
   finalizers:
     - resources-finalizer.argocd.argoproj.io
 spec:
   project: default
   source:
-    repoURL: https://github.com/chayma1205/hivemind-challenge.git
+    repoURL: git@github.com:chayma1205/hivemind-challenge.git
     targetRevision: main
-    path: charts/env/prod/critical/cert-manager
+    path: charts/env/prod/critical/crossplane
     helm:
       valueFiles:
         - values.yaml
   destination:
     server: https://kubernetes.default.svc
-    namespace: cert-manager
+    namespace: crossplane-system
   syncPolicy:
     automated:
       prune: true
@@ -159,35 +160,9 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://github.com/chayma1205/hivemind-challenge.git
+    repoURL: git@github.com:chayma1205/hivemind-challenge.git
     targetRevision: main
     path: charts/env/prod/critical/karpenter
-    helm:
-      valueFiles:
-        - values.yaml
-  destination:
-    server: https://kubernetes.default.svc
-    namespace: kube-system
-  syncPolicy:
-    automated:
-      prune: true
-      selfHeal: true
-    syncOptions:
-      - CreateNamespace=true
----
-apiVersion: argoproj.io/v1alpha1
-kind: Application
-metadata:
-  name: metrics-server
-  namespace: argocd
-  finalizers:
-    - resources-finalizer.argocd.argoproj.io
-spec:
-  project: default
-  source:
-    repoURL: https://github.com/chayma1205/hivemind-challenge.git
-    targetRevision: main
-    path: charts/env/prod/critical/metrics-server
     helm:
       valueFiles:
         - values.yaml
@@ -211,17 +186,13 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://github.com/chayma1205/hivemind-challenge.git
+    repoURL: git@github.com:chayma1205/hivemind-challenge.git
     targetRevision: main
     path: charts/env/prod/apps/greeter
     helm:
       valueFiles:
         - values.yaml
       parameters:
-        - name: image.repository
-          value: "324464328617.dkr.ecr.us-east-1.amazonaws.com/hivemind-greeter"
-        - name: image.tag
-          value: "ea792b8"
         - name: env.HELLO_TAG
           value: "hivemind-prod"
   destination:

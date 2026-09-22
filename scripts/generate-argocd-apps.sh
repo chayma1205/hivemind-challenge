@@ -23,7 +23,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 CHARTS_ROOT="${REPO_ROOT}/charts/env/prod"
 
-REPO_URL="${REPO_URL:-https://github.com/chayma1205/hivemind-challenge.git}"
+REPO_URL="${REPO_URL:-git@github.com:chayma1205/hivemind-challenge.git}"
 TARGET_REVISION="${TARGET_REVISION:-main}"
 OUTPUT_FILE="${OUTPUT_FILE:-${CHARTS_ROOT}/argocd-apps.yaml}"
 
@@ -126,8 +126,9 @@ EOF
 #
 #   kubectl apply -n argocd -f charts/env/prod/argocd-apps.yaml
 #
-# This repo is public (see docs/DECISIONS.md #10), so Argo CD clones it
-# over plain HTTPS with no registered credential needed.
+# This repo is private (see docs/DECISIONS.md #10), so Argo CD clones it
+# over SSH using a registered deploy-key credential — see
+# charts/env/prod/central-services/argocd/README.md.
 #
 # The "root" Application below watches this exact file, so re-applying it
 # by hand is a one-time bootstrap step -- every regeneration after that

@@ -2,8 +2,7 @@
 # Full reference: https://github.com/argoproj/argo-helm/blob/argo-cd-10.9.1/charts/argo-cd/values.yaml
 argo-cd:
   global:
-    # TODO: replace once a real domain + ACM certificate exist for prod.
-    domain: argocd.example.com
+    domain: argocd.hivemind.chaima.online
 
     # Pin every component to the system node group (see
     # terraform/envs/prod's eks_managed_node_groups.default: labels
@@ -31,14 +30,19 @@ argo-cd:
   server:
     replicas: 2
     ingress:
-      # Enable once charts/env/prod/critical/aws-load-balancer-controller is
-      # installed and global.domain/ACM cert are configured.
-      enabled: false
+      enabled: true
       ingressClassName: alb
       annotations:
         alb.ingress.kubernetes.io/scheme: internet-facing
         alb.ingress.kubernetes.io/target-type: ip
         alb.ingress.kubernetes.io/backend-protocol: HTTP
+        alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS": 443}]'
+        alb.ingress.kubernetes.io/ssl-redirect: "443"
+        # TODO: set to `terraform output -raw acm_certificate_arn` from
+        # terraform/envs/prod (terraform/envs/prod/domain.tf's wildcard
+        # cert for *.hivemind.chaima.online). Left blank so the ALB
+        # controller fails loudly rather than serving unencrypted.
+        alb.ingress.kubernetes.io/certificate-arn: ""
     resources:
       requests:
         cpu: 100m

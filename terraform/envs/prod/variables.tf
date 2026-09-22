@@ -40,6 +40,12 @@ variable "ecr_repository_name" {
   default     = "hivemind-greeter"
 }
 
+variable "ecr_signatures_repository_name" {
+  description = "Name of the ECR repository cosign pushes signature/attestation/provenance artifacts to for the greeter image. MUTABLE (unlike ecr_repository_name): cosign rewrites its .sig/.att tags in place."
+  type        = string
+  default     = "hivemind-greeter-signatures"
+}
+
 variable "github_owner" {
   description = "GitHub account this cluster's CI/CD pipeline runs from."
   type        = string
@@ -53,21 +59,21 @@ variable "github_owner_id" {
 }
 
 variable "github_repo" {
-  description = "GitHub repository name (without the owner) this cluster's CI/CD pipeline runs from."
+  description = "GitHub repository (without the owner) this cluster's image build/push CI/CD pipeline runs from. The greeter app's source (and its ci/cd workflows) live in a separate repo from this GitOps repo (hivemind-challenge) — see docs/DECISIONS.md #11."
   type        = string
-  default     = "hivemind-challenge"
+  default     = "hivemind-greeter"
 }
 
 variable "github_repo_id" {
-  description = "Numeric GitHub repository ID (`gh api repos/<owner>/<repo> --jq .id`) — see github_owner_id."
+  description = "Numeric GitHub repository ID for github_repo (`gh api repos/<owner>/<repo> --jq .id`) — see github_owner_id."
   type        = string
-  default     = "1370459474"
+  default     = "1379362394"
 }
 
 variable "node_instance_types" {
   description = "Instance types for the EKS managed node group."
   type        = list(string)
-  default     = ["t3.medium"]
+  default     = ["t3.large"]
 }
 
 variable "node_min_size" {
@@ -86,6 +92,18 @@ variable "node_desired_size" {
   description = "Desired number of nodes in the default managed node group."
   type        = number
   default     = 2
+}
+
+variable "cluster_endpoint_public_access_cidrs" {
+  description = "CIDR blocks allowed to reach the EKS public API endpoint. Defaults to the operator's own IP at the time this was set; update if your IP changes."
+  type        = list(string)
+  default     = ["93.244.115.182/32"]
+}
+
+variable "domain_name" {
+  description = "Domain name external-dns manages records in and cert-manager issues certificates for. A Route53 public hosted zone for this exact name must already exist (see domain.tf)."
+  type        = string
+  default     = "hivemind.chaima.online"
 }
 
 variable "tags" {

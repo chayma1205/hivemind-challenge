@@ -59,8 +59,8 @@ helm upgrade --install greeter . \
 * `ingress.enabled` defaults to `false` for the same reason as the other
   charts' ingress: it needs the ALB controller and a real domain/ACM
   certificate first.
-* `autoscaling.enabled` defaults to `true`, backed by
-  [`charts/env/prod/critical/metrics-server`](../../critical/metrics-server).
+* `autoscaling.enabled` defaults to `true`, backed by the `metrics-server`
+  EKS addon (`terraform/envs/prod/main.tf`'s `module.eks.cluster_addons`).
   If the HPA reports `unable to fetch metrics from resource metrics API`,
   metrics-server either isn't installed/synced yet or hasn't scraped a
   cycle since it started (~1 min) — it's not a greeter-side problem.

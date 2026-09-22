@@ -127,7 +127,7 @@ support. Tradeoff: newest versions have had the least real-world soak time;
 pin to an older supported version (e.g. `1.33`) if that matters more than
 runway for a given deployment.
 
-## 10. This GitHub repo is public
+## 10. This GitHub repo is public → revisited: made private
 
 **Context:** Argo CD needs to clone this repo to sync
 [`charts/env/prod/argocd-apps.yaml`](../charts/env/prod/argocd-apps.yaml).
@@ -137,19 +137,39 @@ this was built in) needed a human to create directly, since an AI agent
 writing credentials into a cluster is exactly the kind of action worth a
 human in the loop rather than full automation.
 
-**Decision:** Make the repo public instead. Verified beforehand that
-nothing sensitive is committed — no tokens/keys, just resource names,
+**Original decision:** Make the repo public instead. Verified beforehand
+that nothing sensitive is committed — no tokens/keys, just resource names,
 non-secret config, and an AWS account ID (not itself a credential).
 
-**Consequences:** Argo CD clones over plain HTTPS with zero credentials —
-no Secret, no `argocd repo add`, no rotation to think about. Tradeoff: the
-repo (code, infra structure, resource-naming conventions) is visible to
-anyone. Revisit if this ever holds a real customer's infrastructure rather
-than a challenge submission — at that point a private repo + a scoped
-deploy-key Secret (or an OIDC-based credential, no long-lived token at all)
-is the right tradeoff to make instead.
+**Original consequences:** Argo CD clones over plain HTTPS with zero
+credentials — no Secret, no `argocd repo add`, no rotation to think about.
+Tradeoff: the repo (code, infra structure, resource-naming conventions) is
+visible to anyone.
 
-## 11. CI/CD: two workflows, OIDC, GitOps hand-off — not a direct deploy
+**Revisited (2026-09-22):** The repo was made private. Exactly the
+tradeoff flagged above as the trigger to revisit this: the app's source
+moved to its own repo ([`hivemind-greeter`](https://github.com/chayma1205/hivemind-greeter),
+see decision #11), and at that point there was no more reason for the
+remaining GitOps-only repo to stay world-readable by default.
+
+**Decision:** A scoped SSH deploy-key Secret, per the original tradeoff
+note — not a PAT, not an OIDC-based credential. Two separate keys, both
+created as a manual bootstrap step (same human-in-the-loop reasoning as
+above, unchanged):
+
+* **Read-only**, for Argo CD's repo-server to clone/sync — see
+  [`charts/env/prod/central-services/argocd/README.md`](../charts/env/prod/central-services/argocd/README.md#repository-access-private-repo).
+* **Write**, for Argo CD Image Updater's git write-back (bumping
+  `greeter`'s image tag) — a separate key so a compromised sync credential
+  can't also push commits; see
+  [`charts/env/prod/central-services/argocd-image-updater/README.md`](../charts/env/prod/central-services/argocd-image-updater/README.md).
+
+**Consequences:** Both keys are repo-scoped (GitHub deploy keys, not
+account-wide PATs) and the read path/write path are fully separated.
+Tradeoff: two credentials to rotate instead of zero: an accepted cost of
+no longer being public.
+
+## 11. CI/CD: two workflows, OIDC, GitOps hand-off — not a direct deploy → revisited: split into two repos, Image Updater hand-off
 
 **Context:** Needed a pipeline to build, scan, and ship the greeter image
 on every merge to `main`, without reintroducing the problems the rest of
@@ -157,31 +177,56 @@ this repo was built to avoid (long-lived AWS keys, a pipeline that can
 silently deploy without passing CI, direct cluster credentials sitting in
 GitHub).
 
-**Decision:** Two separate workflows, not one:
+**Original decision:** Two separate workflows, not one, both living here
+alongside `app/`:
 
-* `ci.yml` runs on every PR and push to `main`, needs no AWS access at
-  all, and never pushes an image anywhere — it only builds (locally,
-  discarded after) and scans.
-* `cd.yml` triggers via `workflow_run` *after* `ci.yml` succeeds on
-  `main` — never on a PR, never on a fork (both only ever trigger
-  `ci.yml`). It authenticates to AWS via GitHub's OIDC provider
-  (`module.github_actions_ecr_push_irsa`), scoped to `ref:refs/heads/main`
-  only and to push-only actions on the single greeter ECR repo ARN — no
-  AWS access key stored in GitHub, and no ECR permission beyond what
-  pushing an image actually requires. It stops at committing the new tag
-  into `argocd-params.env`; Argo CD (already watching this repo) does the
-  actual deploy.
+* `ci.yml` ran on every PR and push to `main`, needed no AWS access at
+  all, and never pushed an image anywhere — it only built (locally,
+  discarded after) and scanned.
+* `cd.yml` triggered via `workflow_run` *after* `ci.yml` succeeded on
+  `main`, authenticated to AWS via GitHub's OIDC provider
+  (`module.github_actions_ecr_push_irsa`), and stopped at committing the
+  new tag into `argocd-params.env`; Argo CD (already watching this repo)
+  did the actual deploy.
 
-**Consequences:** A compromised PR (even from a fork editing workflow
-files) never gets AWS credentials — only a merged, CI-passed commit on
-`main` can trigger a push, and only to that one repo. Losing the GitHub
-OIDC role does less damage than losing a static key would (short-lived,
-narrowly scoped, revocable by deleting the trust relationship). Tradeoff:
-`cd.yml` rebuilds the same commit rather than reusing `ci.yml`'s build
-artifact directly — a deliberate simplicity/reproducibility choice
-(Dockerfile-pinned, so this is a real rebuild-for-rebuild match, not a
-"trust the past" leap) over the added complexity of passing a `docker
-save`d image between workflows. The pipeline's own commit-back to
-`argocd-params.env` is prevented from re-triggering itself by `ci.yml`'s
-`paths: [app/**]` filter (that commit never touches `app/`) plus a
-`[skip ci]` commit message as defense in depth.
+**Revisited (2026-09-22):** The greeter app's source moved to its own
+repo, [`hivemind-greeter`](https://github.com/chayma1205/hivemind-greeter)
+— `app/` no longer exists here. This repo is GitOps-only now: charts,
+`argocd-apps.yaml`, and Terraform. Consequences for what was decided
+above:
+
+* `cd.yml` (here) is **deleted** — there's nothing left for it to build.
+* `ci.yml` (here) is trimmed to `helm-lint` on the greeter chart plus a
+  check that `argocd-apps.yaml` is up to date with the chart directories
+  — the only things left in this repo worth validating on every push.
+* `module.github_actions_ecr_push_irsa`'s OIDC trust
+  (`terraform/envs/prod/github.tf`) now points at `hivemind-greeter`
+  (`var.github_repo`/`var.github_repo_id`), not this repo — that's where
+  the OIDC-authenticated push actually happens now, via that repo's own
+  `_build-push.yml` (shared by its `main`, `releases/**`, and Release-tag
+  triggers). Also added `module.ecr_signatures`
+  (`hivemind-greeter-signatures`, MUTABLE) for that pipeline's cosign
+  signature/SBOM/provenance attestations — cosign rewrites `.sig`/`.att`
+  tags in place, incompatible with `ecr_greeter`'s IMMUTABLE tags.
+* **The git commit-back step is gone.** Instead of `cd.yml` hand-editing
+  `argocd-params.env` after every push to `main`, prod now only moves on
+  a **published GitHub Release** (`vX.Y.Z` tag) in `hivemind-greeter`.
+  Argo CD Image Updater (`charts/env/prod/central-services/argocd-image-updater`,
+  its `ImageUpdater` CR in `templates/imageupdater.yaml`) watches ECR for
+  tags matching that shape and writes the new `image.tag` directly into
+  `charts/env/prod/apps/greeter/values.yaml` via its own git write-back —
+  no CI workflow in either repo touches this repo's git history for a
+  routine deploy anymore.
+
+**Consequences:** Slower, deliberate promotion to prod (a Release, not
+every merge) instead of continuous deploy on every `main` push — a
+tradeoff accepted because "cut a Release" is an explicit, auditable human
+action, and because `hivemind-greeter`'s `main`/`releases/**` branches
+still get commit-SHA/staging-tagged images pushed to ECR (via `cd.yml`/
+`cd-staging.yml` there) without ever reaching prod, giving a real
+promotion gate. The OIDC role and least-privilege ECR push scoping from
+the original decision are unchanged, just re-pointed at the repo that
+actually needs them now. Image Updater's write-back needs its own
+**write**-scoped git credential, separate from Argo CD's own read-only
+sync credential (see decision #10) — a new moving part, but one that
+keeps the sync path read-only even though the deploy path can now push.

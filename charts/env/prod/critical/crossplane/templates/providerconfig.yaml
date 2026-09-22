@@ -1,0 +1,13 @@
+{{- if .Values.providerConfig.enabled }}
+# `source: PodIdentity` — this pod runs as the "provider-aws" service
+# account (templates/deploymentruntimeconfig.yaml), which has an EKS Pod
+# Identity association to an IAM role (terraform/envs/prod/domain.tf's
+# aws_iam_role.crossplane_aws_provider). No Secret needed.
+apiVersion: aws.upbound.io/v1beta1
+kind: ProviderConfig
+metadata:
+  name: {{ .Values.providerConfig.name }}
+spec:
+  credentials:
+    source: PodIdentity
+{{- end }}

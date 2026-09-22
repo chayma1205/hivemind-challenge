@@ -1,0 +1,42 @@
+# CRD-based config (not the legacy `argocd-image-updater.argoproj.io/*`
+# Application annotations — those were superseded by this CRD as of the
+# 1.x line this chart pins; see
+# https://github.com/argoproj-labs/argocd-image-updater/blob/v1.3.0/docs/configuration/migration.md).
+#
+# Watches the `greeter` Application (charts/env/prod/apps/greeter) for new
+# ECR tags matching a release version, and writes the new tag straight
+# into that chart's values.yaml via a git commit — Argo CD's own
+# `selfHeal` then picks it up, same hand-off model as every other
+# git-driven change in this repo.
+apiVersion: argocd-image-updater.argoproj.io/v1alpha1
+kind: ImageUpdater
+metadata:
+  name: greeter
+  namespace: argocd
+spec:
+  writeBackConfig:
+    # `git:secret:<name>` (not the bare "git" default, which reuses Argo
+    # CD's own repo-server credential — read-only, see
+    # ../argocd/README.md#repository-access-private-repo, so a push here
+    # would fail). `<name>` resolves in the ImageUpdater CR's own
+    # namespace (argocd), no namespace prefix needed.
+    method: "git:secret:argocd-image-updater-git-creds"
+    gitConfig:
+      # SSH, not HTTPS: this repo is private (see docs/DECISIONS.md #10).
+      repository: {{ .Values.imageUpdater.gitRepository }}
+      branch: main
+      writeBackTarget: "helmvalues:charts/env/prod/apps/greeter/values.yaml"
+  applicationRefs:
+    - namePattern: "greeter"
+      images:
+        - alias: greeter
+          imageName: {{ .Values.imageUpdater.ecrRepositoryUrl }}
+          commonUpdateSettings:
+            updateStrategy: semver
+            # Must match cd-release.yml's tag-validation regex in the
+            # hivemind-greeter repo exactly, or a published Release would
+            # silently never reach prod.
+            allowTags: 'regexp:^v[0-9]+\.[0-9]+\.[0-9]+$'
+          manifestTargets:
+            helm:
+              tag: "image.tag"

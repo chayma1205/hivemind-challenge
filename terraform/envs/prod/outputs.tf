@@ -60,8 +60,28 @@ output "aws_load_balancer_controller_iam_role_arn" {
 }
 
 output "cert_manager_iam_role_arn" {
-  description = "IRSA role ARN for cert-manager's Route53 DNS-01 solver — set in that chart's serviceAccount.annotations."
-  value       = module.cert_manager_irsa.iam_role_arn
+  description = "IAM role ARN for cert-manager's Route53 DNS-01 solver — bound via the EKS Pod Identity association in domain.tf, no manual annotation needed."
+  value       = aws_iam_role.cert_manager.arn
+}
+
+output "external_dns_iam_role_arn" {
+  description = "IAM role ARN for the external-dns EKS addon's Route53 access — bound via the EKS Pod Identity association in domain.tf."
+  value       = aws_iam_role.external_dns.arn
+}
+
+output "hosted_zone_id" {
+  description = "ID of the Route53 public hosted zone for var.domain_name."
+  value       = data.aws_route53_zone.this.zone_id
+}
+
+output "crossplane_aws_provider_iam_role_arn" {
+  description = "IAM role ARN for the Crossplane AWS family provider — bound via the EKS Pod Identity association in domain.tf. Minimal placeholder permissions, see charts/env/prod/critical/crossplane/README.md."
+  value       = aws_iam_role.crossplane_aws_provider.arn
+}
+
+output "acm_certificate_arn" {
+  description = "ARN of the wildcard ACM cert for *.var.domain_name — set as alb.ingress.kubernetes.io/certificate-arn in the argocd and greeter charts' values.yaml."
+  value       = aws_acm_certificate_validation.wildcard.certificate_arn
 }
 
 output "argocd_image_updater_iam_role_arn" {

@@ -203,9 +203,10 @@ and a merge, not just `helm template`/reading the YAML):
   annotation telling it which image to watch. In practice this doesn't
   block deploys — `cd.yml` already handles the tag bump — but Image
   Updater's own automatic-detection path is unused.
-* No real domain — cert-manager's `ClusterIssuer` is disabled
-  ([`clusterIssuer.enabled: false`](../charts/env/prod/critical/cert-manager/values.yaml)),
-  and every chart's `ingress.enabled` stays `false` for the same reason.
+* No real domain — cert-manager (now the `cert-manager` EKS addon, see
+  `terraform/envs/prod/main.tf`'s `module.eks.cluster_addons`) has no
+  `ClusterIssuer` configured yet, and every chart's `ingress.enabled` stays
+  `false` for the same reason.
 * Observability beyond metrics-server / EKS-CloudWatch defaults — no log
   aggregation, alerting, or dashboards.
 

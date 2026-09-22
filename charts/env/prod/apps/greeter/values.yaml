@@ -1,13 +1,16 @@
 replicaCount: 2
 
 image:
-  # TODO: set to `terraform output -raw ecr_repository_url` from
-  # terraform/envs/prod. Left blank so an unfilled deploy fails loudly
-  # rather than pulling a wrong/nonexistent image.
-  repository: ""
-  # TODO: an immutable tag (e.g. git SHA) pushed by CI — never "latest",
-  # the ECR repo's tag mutability is IMMUTABLE (see terraform/envs/prod).
-  tag: ""
+  # terraform/envs/prod output `ecr_repository_url` (module.ecr_greeter).
+  # Fixed — only `tag` below moves.
+  repository: "324464328617.dkr.ecr.us-east-1.amazonaws.com/hivemind-greeter"
+  # Bootstrap value only. Owned by Argo CD Image Updater from here on: see
+  # charts/env/prod/central-services/argocd-image-updater/templates/imageupdater.yaml,
+  # which overwrites this field via a git commit whenever a new `vX.Y.Z`
+  # tag lands in ECR (published as a GitHub Release in the hivemind-greeter
+  # repo — see docs/DECISIONS.md #11). Don't hand-edit once that's live;
+  # it'll just be overwritten on the next sync.
+  tag: "ea792b8"
   pullPolicy: IfNotPresent
 
 # Every rendered value here becomes a container env var. HELLO_TAG is
@@ -22,17 +25,21 @@ service:
   targetPort: 8080
 
 ingress:
-  # Enable once charts/env/prod/critical/aws-load-balancer-controller is
-  # installed and a real domain/ACM cert exist for prod.
-  enabled: false
+  enabled: true
   ingressClassName: alb
   annotations:
     alb.ingress.kubernetes.io/scheme: internet-facing
     alb.ingress.kubernetes.io/target-type: ip
     alb.ingress.kubernetes.io/backend-protocol: HTTP
     alb.ingress.kubernetes.io/healthcheck-path: /
-  # TODO: replace with the real prod hostname.
-  host: greeter.example.com
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS": 443}]'
+    alb.ingress.kubernetes.io/ssl-redirect: "443"
+    # TODO: set to `terraform output -raw acm_certificate_arn` from
+    # terraform/envs/prod (terraform/envs/prod/domain.tf's wildcard cert
+    # for *.hivemind.chaima.online). Left blank so the ALB controller
+    # fails loudly (no HTTPS listener) rather than serving unencrypted.
+    alb.ingress.kubernetes.io/certificate-arn: ""
+  host: greeter.hivemind.chaima.online
 
 resources:
   requests:

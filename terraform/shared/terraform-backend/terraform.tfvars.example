@@ -1,2 +1,2 @@
 aws_region  = "us-east-1"
-bucket_name = "hivemind-challenge-tfstate"
+bucket_name = "hivemind-challenge-greeter-tfstate"

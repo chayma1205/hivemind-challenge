@@ -7,9 +7,14 @@ cluster_version = "1.36"
 vpc_cidr           = "10.0.0.0/16"
 single_nat_gateway = false
 
+# CIDRs allowed to reach the EKS public API endpoint. Defaults to the
+# operator's IP as of the last `terraform apply` (variables.tf) — override
+# here if it changes or if multiple operators need access.
+# cluster_endpoint_public_access_cidrs = ["203.0.113.10/32"]
+
 ecr_repository_name = "hivemind-greeter"
 
-node_instance_types = ["t3.medium"]
+node_instance_types = ["t3.large"]
 node_min_size       = 2
 node_max_size       = 4
 node_desired_size   = 2

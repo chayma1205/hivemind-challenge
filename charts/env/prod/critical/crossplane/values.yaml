@@ -1,0 +1,86 @@
+# Values passed through to the crossplane subchart (dependency name: crossplane).
+# Full reference: https://github.com/crossplane/crossplane/blob/v2.4.1/cluster/charts/crossplane/values.yaml
+crossplane:
+  replicas: 2
+
+  resourcesCrossplane:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 1024Mi
+
+  resourcesRBACManager:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 100m
+      memory: 512Mi
+
+  # Installs the AWS family meta-provider at `helm install`/sync time via
+  # Crossplane's own `core init --provider` (see the chart's deployment.yaml
+  # init container), instead of a separate `kubectl apply -f provider.yaml`
+  # step. Its Provider object picks up runtimeConfigRef.name: "default"
+  # (the CRD's own default), which resolves to this chart's
+  # DeploymentRuntimeConfig (templates/deploymentruntimeconfig.yaml,
+  # named "default") — that's what pins its pod to the system node group
+  # and gives it a fixed ServiceAccount name for the EKS Pod Identity
+  # association in terraform/envs/prod/domain.tf.
+  #
+  # Family-specific providers (provider-aws-s3, provider-aws-rds, ...) can
+  # be added here later; they share the same "default" runtime config and
+  # ProviderConfig unless given their own.
+  provider:
+    packages:
+      - xpkg.upbound.io/upbound/provider-family-aws:v2.8.1
+
+  # Pin to the system node group (terraform/envs/prod's
+  # eks_managed_node_groups.default: labels role=system, taint
+  # CriticalAddonsOnly=true:NoSchedule), same as this repo's other
+  # cluster-critical charts. Covers the Crossplane and RBAC Manager pods;
+  # the AWS provider pod is pinned separately via
+  # templates/deploymentruntimeconfig.yaml.
+  nodeSelector:
+    role: system
+  tolerations:
+    - key: CriticalAddonsOnly
+      operator: Equal
+      value: "true"
+      effect: NoSchedule
+
+  rbacManager:
+    replicas: 2
+    nodeSelector:
+      role: system
+    tolerations:
+      - key: CriticalAddonsOnly
+        operator: Equal
+        value: "true"
+        effect: NoSchedule
+
+# Values for this chart's own templates (DeploymentRuntimeConfig /
+# ProviderConfig), not the crossplane subchart.
+runtimeConfig:
+  # Must stay "default" — it's the CRD's own default for
+  # Provider.spec.runtimeConfigRef.name, which is how the family provider
+  # installed above picks this up without us creating a Provider object
+  # ourselves.
+  name: default
+  # Fixed name (instead of the package manager's hash-suffixed default) so
+  # terraform/envs/prod/domain.tf's EKS Pod Identity association has a
+  # stable target.
+  serviceAccountName: provider-aws
+
+providerConfig:
+  # Stays disabled until the AWS family provider package above has
+  # finished installing and registered its CRDs (a few minutes after first
+  # sync) — applying a ProviderConfig before then fails with "no matches
+  # for kind ProviderConfig in version aws.upbound.io/v1beta1", the same
+  # bootstrap-ordering problem the cert-manager chart used to solve with
+  # `clusterIssuer.enabled: false`. Flip to true once
+  # `kubectl get providers` shows the family provider HEALTHY=True, then
+  # re-sync.
+  enabled: false
+  name: aws-pod-identity

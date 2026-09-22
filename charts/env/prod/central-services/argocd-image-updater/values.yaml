@@ -95,3 +95,10 @@ argocd-image-updater:
     - name: aws-cli
       mountPath: /usr/local/bin/aws
       subPath: aws
+
+# Values for this chart's own template (templates/imageupdater.yaml), not
+# the argocd-image-updater subchart.
+imageUpdater:
+  gitRepository: "git@github.com:chayma1205/hivemind-challenge.git"
+  # terraform/envs/prod output `ecr_repository_url` (module.ecr_greeter).
+  ecrRepositoryUrl: "324464328617.dkr.ecr.us-east-1.amazonaws.com/hivemind-greeter"
