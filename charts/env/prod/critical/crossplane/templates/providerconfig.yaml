@@ -7,6 +7,11 @@ apiVersion: aws.upbound.io/v1beta1
 kind: ProviderConfig
 metadata:
   name: {{ .Values.providerConfig.name }}
+  annotations:
+    # Defense in depth alongside the manual "verify HEALTHY before
+    # enabling" step in README.md — see
+    # templates/deploymentruntimeconfig.yaml's sync-wave comment for why.
+    argocd.argoproj.io/sync-wave: "2"
 spec:
   credentials:
     source: PodIdentity
