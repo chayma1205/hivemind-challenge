@@ -38,10 +38,11 @@ argo-cd:
         alb.ingress.kubernetes.io/backend-protocol: HTTP
         alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS": 443}]'
         alb.ingress.kubernetes.io/ssl-redirect: "443"
-        # TODO: set to `terraform output -raw acm_certificate_arn` from
-        # terraform/envs/prod (terraform/envs/prod/domain.tf's wildcard
-        # cert for *.hivemind.chaima.online). Left blank so the ALB
-        # controller fails loudly rather than serving unencrypted.
+        # TODO: the wildcard cert for *.hivemind.chaima.online is managed
+        # by Crossplane now (charts/env/prod/critical/crossplane), not
+        # Terraform — see the greeter chart's values.yaml for how to read
+        # the ARN once it's ISSUED. Left blank so the ALB controller fails
+        # loudly rather than serving unencrypted.
         alb.ingress.kubernetes.io/certificate-arn: ""
     resources:
       requests:

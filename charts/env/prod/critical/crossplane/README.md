@@ -36,14 +36,11 @@ IRSA:
    `spec.credentials.source: PodIdentity`, which reads those Pod
    Identity-injected credentials — no `Secret` needed.
 
-### ⚠️ IAM role is a minimal placeholder
+### IAM role scope
 
-`aws_iam_role.crossplane_aws_provider` in `domain.tf` is scoped to just
-`sts:GetCallerIdentity` for now (proves the Pod Identity credential chain
-works end-to-end without granting any real resource access). Attach real
-permissions — AWS managed policies or hand-written ones — once you decide
-which AWS resources Crossplane should actually manage; narrow the role
-`Provider` and its Kubernetes claims will need.
+`aws_iam_role.crossplane_aws_provider` in `domain.tf` is scoped to ACM +
+Route53 — what Crossplane actually manages today (see below). Narrow or
+widen it as more Crossplane-managed resource types are added.
 
 ### ⚠️ `providerConfig.enabled: false` until the provider is healthy
 
@@ -57,6 +54,45 @@ with `no matches for kind "ProviderConfig" in version
 `kubectl get providers` shows `provider-family-aws` `HEALTHY=True`, flip
 `providerConfig.enabled: true` and re-sync (or let Argo CD self-heal pick
 it up next pass).
+
+## What Crossplane manages: the wildcard ingress cert
+
+The ACM cert for `*.hivemind.chaima.online` (argocd/greeter ingress TLS —
+see `terraform/envs/prod/domain.tf`'s comment on why this is ACM, not
+cert-manager) used to be Terraform-managed. It's Crossplane-managed now:
+
+* [`templates/certificate.yaml`](templates/certificate.yaml) — the
+  `Certificate` (`acm.aws.upbound.io`), DNS validation method.
+* [`templates/certificate-validation-record.yaml`](templates/certificate-validation-record.yaml) —
+  the Route53 CNAME that proves domain ownership.
+* [`templates/certificatevalidation.yaml`](templates/certificatevalidation.yaml) —
+  `CertificateValidation`, which blocks until ACM sees the record above
+  and marks the cert `ISSUED`. Its `certificateArnRef` resolves the cert's
+  ARN automatically — that's a native Crossplane cross-resource reference,
+  no manual wiring needed for that part.
+
+### ⚠️ One manual value, once, after first sync
+
+ACM assigns the validation CNAME's name/value *when the `Certificate` is
+requested* — there's no way to know it ahead of time, and this repo has no
+Crossplane Composition to wire the two resources together automatically
+(would need a full XRD + function-pipeline Composition, not attempted
+here). So:
+
+1. `domainCertificate.enabled: true`, sync, wait for the family provider's
+   ACM sub-package to install and `Certificate wildcard` to exist.
+2. Read the assigned record:
+   ```bash
+   kubectl get certificate wildcard -n crossplane-system \
+     -o jsonpath='{.status.atProvider.domainValidationOptions}'
+   ```
+3. Fill `domainCertificate.validationRecord.name`/`.value` in
+   [`values.yaml`](values.yaml) from that output, set
+   `validationRecord.enabled: true`, commit, re-sync.
+
+Once `CertificateValidation wildcard` reports `Ready`, pull the ARN into
+the argocd/greeter charts' `alb.ingress.kubernetes.io/certificate-arn` —
+see the TODO comment in either chart's `values.yaml`.
 
 ## Install
 

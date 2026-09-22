@@ -29,12 +29,16 @@ crossplane:
   # and gives it a fixed ServiceAccount name for the EKS Pod Identity
   # association in terraform/envs/prod/domain.tf.
   #
-  # Family-specific providers (provider-aws-s3, provider-aws-rds, ...) can
-  # be added here later; they share the same "default" runtime config and
-  # ProviderConfig unless given their own.
+  # Family-specific providers share the same "default" runtime config and
+  # ProviderConfig unless given their own. acm/route53 are what this
+  # cluster actually manages today (the wildcard ingress cert — see
+  # templates/certificate*.yaml); add more (provider-aws-s3, ...) here as
+  # needed.
   provider:
     packages:
       - xpkg.upbound.io/upbound/provider-family-aws:v2.8.1
+      - xpkg.upbound.io/upbound/provider-aws-acm:v2.8.1
+      - xpkg.upbound.io/upbound/provider-aws-route53:v2.8.1
 
   # Pin to the system node group (terraform/envs/prod's
   # eks_managed_node_groups.default: labels role=system, taint
@@ -84,3 +88,26 @@ providerConfig:
   # re-sync.
   enabled: false
   name: aws-pod-identity
+
+# Values for templates/certificate*.yaml — the wildcard ACM cert for the
+# ALB-fronted ingresses (argocd, greeter), replacing what used to be
+# Terraform-managed in terraform/envs/prod/domain.tf. Gated by
+# providerConfig.enabled above (same bootstrap ordering).
+domainCertificate:
+  enabled: false
+  domainName: hivemind.chaima.online
+  # terraform/envs/prod output `hosted_zone_id` (data.aws_route53_zone.this).
+  zoneId: Z03083393MYD67KYV7VMW
+
+  # The Record's name/records values are only known after the Certificate
+  # above is created and ACM assigns its validation CNAME — a real value
+  # ACM generates per-request, not something derivable ahead of time (this
+  # repo has no Crossplane Composition wiring the two together
+  # automatically; see the chart README for why). One-time manual step:
+  #   kubectl get certificate wildcard -n crossplane-system \
+  #     -o jsonpath='{.status.atProvider.domainValidationOptions}'
+  # then fill these in and flip enabled: true.
+  validationRecord:
+    enabled: false
+    name: ""
+    value: ""

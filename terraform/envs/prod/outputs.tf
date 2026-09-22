@@ -79,10 +79,10 @@ output "crossplane_aws_provider_iam_role_arn" {
   value       = aws_iam_role.crossplane_aws_provider.arn
 }
 
-output "acm_certificate_arn" {
-  description = "ARN of the wildcard ACM cert for *.var.domain_name — set as alb.ingress.kubernetes.io/certificate-arn in the argocd and greeter charts' values.yaml."
-  value       = aws_acm_certificate_validation.wildcard.certificate_arn
-}
+# No acm_certificate_arn output here — the wildcard cert is now managed by
+# Crossplane (charts/env/prod/critical/crossplane), not Terraform. Once
+# synced: `kubectl get certificate wildcard -n crossplane-system -o
+# jsonpath='{.status.atProvider.arn}'`.
 
 output "argocd_image_updater_iam_role_arn" {
   description = "IRSA role ARN for argocd-image-updater's ECR read access — set in that chart's serviceAccount.annotations."

@@ -130,9 +130,9 @@ resource "aws_eks_pod_identity_association" "cert_manager" {
 # (charts/env/prod/critical/crossplane) — namespace/service-account match
 # that chart's DeploymentRuntimeConfig (templates/deploymentruntimeconfig.yaml).
 #
-# Minimal placeholder policy (sts:GetCallerIdentity only) by design — see
-# that chart's README: attach real permissions once specific AWS resources
-# Crossplane should manage are decided, rather than guessing a scope here.
+# Scoped to ACM + Route53 — what Crossplane actually manages (the wildcard
+# cert for the ALB ingresses, and its DNS validation record). Narrow
+# further, or widen, as more Crossplane-managed resource types are added.
 resource "aws_iam_role" "crossplane_aws_provider" {
   name = "${var.cluster_name}-crossplane-aws-provider"
 
@@ -151,17 +151,54 @@ resource "aws_iam_role" "crossplane_aws_provider" {
 }
 
 resource "aws_iam_role_policy" "crossplane_aws_provider" {
-  name = "placeholder-sts-only"
+  name = "acm-and-route53"
   role = aws_iam_role.crossplane_aws_provider.id
 
   policy = jsonencode({
     Version = "2012-10-17"
-    Statement = [{
-      Sid      = "ProveCredentialChainWorks"
-      Effect   = "Allow"
-      Action   = ["sts:GetCallerIdentity"]
-      Resource = ["*"]
-    }]
+    Statement = [
+      {
+        # ACM doesn't support resource-level scoping for RequestCertificate
+        # (no ARN exists yet at request time), and AWS's own ACM IAM
+        # examples leave the rest at Resource "*" too — there's no useful
+        # narrower scope for a service where certs aren't tied to a
+        # specific parent resource.
+        Sid    = "ManageCertificates"
+        Effect = "Allow"
+        Action = [
+          "acm:RequestCertificate",
+          "acm:DescribeCertificate",
+          "acm:GetCertificate",
+          "acm:ListCertificates",
+          "acm:ListTagsForCertificate",
+          "acm:AddTagsToCertificate",
+          "acm:RemoveTagsFromCertificate",
+          "acm:RenewCertificate",
+          "acm:DeleteCertificate",
+        ]
+        Resource = ["*"]
+      },
+      {
+        # Same shape as the cert-manager and external-dns policies above —
+        # write scoped to this one hosted zone.
+        Sid      = "ChangeRecordsInThisZone"
+        Effect   = "Allow"
+        Action   = ["route53:ChangeResourceRecordSets"]
+        Resource = [data.aws_route53_zone.this.arn]
+      },
+      {
+        Sid      = "GetChangeStatus"
+        Effect   = "Allow"
+        Action   = ["route53:GetChange"]
+        Resource = ["arn:aws:route53:::change/*"]
+      },
+      {
+        Sid      = "ListZonesAndRecords"
+        Effect   = "Allow"
+        Action   = ["route53:ListHostedZones", "route53:ListResourceRecordSets", "route53:ListTagsForResource"]
+        Resource = ["*"]
+      }
+    ]
   })
 }
 
@@ -174,44 +211,10 @@ resource "aws_eks_pod_identity_association" "crossplane_aws_provider" {
   tags = var.tags
 }
 
-# Wildcard ACM cert for the ALB-fronted ingresses (argocd, greeter — see
-# their charts' values.yaml). DNS-validated against the zone above rather
-# than cert-manager: the AWS Load Balancer Controller terminates TLS using
-# an ACM certificate ARN (`alb.ingress.kubernetes.io/certificate-arn`), not
-# a cert-manager-issued Secret, so ACM is the native fit here regardless of
-# cert-manager's own DNS-01 setup above (which stays useful for anything
-# that needs an in-cluster TLS secret instead of ALB-terminated TLS).
-resource "aws_acm_certificate" "wildcard" {
-  domain_name       = "*.${var.domain_name}"
-  validation_method = "DNS"
-
-  subject_alternative_names = [var.domain_name]
-
-  tags = var.tags
-
-  lifecycle {
-    create_before_destroy = true
-  }
-}
-
-resource "aws_route53_record" "wildcard_cert_validation" {
-  for_each = {
-    for dvo in aws_acm_certificate.wildcard.domain_validation_options : dvo.domain_name => {
-      name   = dvo.resource_record_name
-      type   = dvo.resource_record_type
-      record = dvo.resource_record_value
-    }
-  }
-
-  zone_id         = data.aws_route53_zone.this.zone_id
-  name            = each.value.name
-  type            = each.value.type
-  records         = [each.value.record]
-  ttl             = 60
-  allow_overwrite = true
-}
-
-resource "aws_acm_certificate_validation" "wildcard" {
-  certificate_arn         = aws_acm_certificate.wildcard.arn
-  validation_record_fqdns = [for r in aws_route53_record.wildcard_cert_validation : r.fqdn]
-}
+# The wildcard ACM cert for the ALB-fronted ingresses (argocd, greeter) is
+# no longer managed here — moved to Crossplane
+# (charts/env/prod/critical/crossplane/templates/certificate*.yaml), which
+# now has real ACM+Route53 permissions below instead of the placeholder
+# sts:GetCallerIdentity-only policy. See that chart's README for the
+# Certificate/Record/CertificateValidation resources and why the
+# validation Record needs one manual value filled in after first sync.

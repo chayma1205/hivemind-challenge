@@ -1,0 +1,21 @@
+{{- if .Values.domainCertificate.validationRecord.enabled }}
+# DNS validation record for templates/certificate.yaml's cert. Values
+# aren't derivable ahead of time (ACM assigns them per-request) — see
+# values.yaml's domainCertificate.validationRecord comment for the
+# one-time manual step that fills these in.
+apiVersion: route53.aws.upbound.io/v1beta1
+kind: Record
+metadata:
+  name: wildcard-cert-validation
+spec:
+  providerConfigRef:
+    name: {{ .Values.providerConfig.name }}
+  forProvider:
+    zoneId: {{ .Values.domainCertificate.zoneId | quote }}
+    name: {{ .Values.domainCertificate.validationRecord.name | quote }}
+    type: CNAME
+    ttl: 60
+    records:
+      - {{ .Values.domainCertificate.validationRecord.value | quote }}
+    allowOverwrite: true
+{{- end }}
