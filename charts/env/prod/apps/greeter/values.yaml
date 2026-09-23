@@ -13,6 +13,14 @@ image:
   tag: "ea792b8"
   pullPolicy: IfNotPresent
 
+# Pod-level hardening. runAsNonRoot: true fails the pod at admission if
+# the image ever tries to run as root — the Dockerfile already sets
+# `USER nonroot:nonroot` (distroless, UID 65532), so this should never
+# actually trigger; it's a backstop against a future image change
+# silently dropping that, not a change in current behavior.
+podSecurityContext:
+  runAsNonRoot: true
+
 # Every rendered value here becomes a container env var. HELLO_TAG is
 # echoed back in every response (see app/greeter.go) — set it to something
 # unique per deployment/environment.

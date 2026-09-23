@@ -52,6 +52,8 @@ spec:
       tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
       containers:
         - name: greeter
           image: "{{ required "image.repository is required (see values.yaml TODO)" .Values.image.repository }}:{{ required "image.tag is required (see values.yaml TODO)" .Values.image.tag }}"
