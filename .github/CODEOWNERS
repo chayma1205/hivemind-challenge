@@ -1,0 +1,10 @@
+# Code owners for this repo. See
+# https://docs.github.com/articles/about-code-owners
+#
+# Single-operator project today, so one blanket rule rather than
+# per-path assignment — split this out by directory (terraform/, charts/,
+# docs/, .github/) once more than one person actually owns different
+# parts of the stack; a per-path CODEOWNERS with only one real owner
+# behind every rule is decorative, not real ownership.
+
+* @chayma1205
