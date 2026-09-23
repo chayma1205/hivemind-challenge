@@ -198,10 +198,15 @@ resource "aws_iam_role_policy" "crossplane_aws_provider" {
       },
       {
         # Same shape as the cert-manager and external-dns policies above —
-        # write scoped to this one hosted zone.
-        Sid      = "ChangeRecordsInThisZone"
+        # scoped to this one hosted zone. GetHostedZone (read) alongside
+        # ChangeResourceRecordSets (write): the Route53 provider's Record
+        # resource calls GetHostedZone before it writes — confirmed live,
+        # the validation-record resource failed
+        # AccessDenied on exactly that action with only
+        # ChangeResourceRecordSets granted.
+        Sid      = "ReadAndChangeRecordsInThisZone"
         Effect   = "Allow"
-        Action   = ["route53:ChangeResourceRecordSets"]
+        Action   = ["route53:GetHostedZone", "route53:ChangeResourceRecordSets"]
         Resource = [data.aws_route53_zone.this.arn]
       },
       {
