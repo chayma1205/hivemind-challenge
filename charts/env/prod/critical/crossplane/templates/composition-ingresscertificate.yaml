@@ -40,7 +40,16 @@ spec:
   pipeline:
     - step: patch-and-transform
       functionRef:
-        name: function-patch-and-transform
+        # Not the short package name — Crossplane's package manager derives
+        # the installed Function object's name from the full package path
+        # (xpkg.upbound.io/crossplane-contrib/function-patch-and-transform),
+        # same convention confirmed live on the provider packages above
+        # (e.g. provider-aws-acm -> upbound-provider-aws-acm). Confirmed
+        # via `kubectl get functions.pkg.crossplane.io` against a live
+        # cluster: using the short name here failed every composite with
+        # "cannot find an active FunctionRevision" — the object it was
+        # looking up by that name simply didn't exist.
+        name: crossplane-contrib-function-patch-and-transform
       input:
         apiVersion: pt.fn.crossplane.io/v1beta1
         kind: Resources
@@ -118,4 +127,4 @@ spec:
 
     - step: auto-ready
       functionRef:
-        name: function-auto-ready
+        name: crossplane-contrib-function-auto-ready
