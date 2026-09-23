@@ -13,13 +13,21 @@ image:
   tag: "ea792b8"
   pullPolicy: IfNotPresent
 
-# Pod-level hardening. runAsNonRoot: true fails the pod at admission if
-# the image ever tries to run as root — the Dockerfile already sets
-# `USER nonroot:nonroot` (distroless, UID 65532), so this should never
-# actually trigger; it's a backstop against a future image change
-# silently dropping that, not a change in current behavior.
+# Pod-level hardening. runAsUser is REQUIRED alongside runAsNonRoot, not
+# optional: the Dockerfile's `USER nonroot:nonroot` is a *named* user, and
+# the kubelet's runAsNonRoot check needs a numeric UID to verify against
+# — it doesn't read /etc/passwd inside the image. Without runAsUser here,
+# every pod fails at container-start with "container has runAsNonRoot and
+# image has non-numeric user (nonroot), cannot verify user is non-root"
+# (hit this live: server-side dry-run validation doesn't catch it, only
+# an actual kubelet on a real node does). 65532:65532 confirmed against
+# the built image's /etc/passwd, not assumed — it's the standard
+# distroless "nonroot" UID/GID, but distroless doesn't guarantee it'll
+# never change, hence checking rather than hardcoding from convention.
 podSecurityContext:
   runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
 
 # Every rendered value here becomes a container env var. HELLO_TAG is
 # echoed back in every response (see app/greeter.go) — set it to something
