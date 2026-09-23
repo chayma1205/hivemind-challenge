@@ -126,12 +126,17 @@ created manually, not Terraform-managed (`domain.tf` only does a
 ever lost). `external-dns` watches Ingress objects and writes matching
 Route53 A/AAAA/TXT records automatically.
 
-The ALB-fronted ingress TLS certificate (`*.hivemind.chaima.online`) is
-mid-migration from Terraform-managed to **Crossplane**-managed — see
-DECISIONS.md for the reasoning and the crossplane chart's README for the
-current manual step required (DNS validation record has no automated
-link between the `Certificate` and `Record` resources yet; a Composition
-would close that gap, not yet built).
+The ALB-fronted ingress TLS certs (one per hostname — `argocd`,
+`greeter` — not a shared wildcard) are **Crossplane**-managed: an
+`IngressCertificate` composite resource per hostname
+(`charts/env/prod/critical/crossplane/templates/ingresscertificates.yaml`),
+rendered by a `function-patch-and-transform` Composition into an ACM
+`Certificate` + Route53 validation `Record` + `CertificateValidation`.
+This is the second attempt — a first, Composition-less pass needed the
+validation record's value copied in by hand and got reverted to
+Terraform; moved back once a real Composition closed that gap. See
+DECISIONS.md and the crossplane chart's README for the full history and
+how the automatic wiring works.
 
 ### State & locking (`terraform/shared/terraform-backend/`)
 
@@ -237,9 +242,6 @@ project's verification layer versus its decision-making.
 
 * The `HELLO_TAG` URL-parameter change (from the original challenge
   brief) hasn't been made — still env-var only, in `hivemind-greeter`.
-* No Composition links the Crossplane-managed ACM `Certificate` to its
-  Route53 validation `Record` automatically — see the crossplane chart's
-  README for the current manual step.
 * No staging environment — `hivemind-greeter`'s `cd-staging.yml` builds
   and pushes staging-tagged images with nowhere to deploy them.
 * Observability beyond metrics-server / EKS-CloudWatch defaults — no log

@@ -237,3 +237,48 @@ actually needs them now. Image Updater's write-back needs its own
 **write**-scoped git credential, separate from Argo CD's own read-only
 sync credential (see decision #10) — a new moving part, but one that
 keeps the sync path read-only even though the deploy path can now push.
+
+## 12. Ingress ACM certs: Crossplane, Terraform, then Crossplane again
+
+**Context:** The ALB-fronted ingresses (argocd, greeter) need per-hostname
+ACM certs, DNS-validated against the Route53 hosted zone `domain.tf`
+already looks up. Both Terraform and Crossplane can create AWS resources
+in this stack; the certs went back and forth between them twice.
+
+**Original decision:** Crossplane — a `Certificate` + `Record` +
+`CertificateValidation` applied directly (no Composition), on the
+reasoning that ACM/Route53 provisioning belonged with the rest of this
+stack's Crossplane-managed AWS resources rather than in Terraform.
+
+**Revisited (2026-09-23, 1st time):** Moved to Terraform
+(`aws_acm_certificate`/`aws_route53_record`/`aws_acm_certificate_validation`
+in `domain.tf`). The Record's validation CNAME name/value are only known
+after ACM assigns them when the Certificate is requested — a plain
+applied-resources Crossplane setup has no way to patch one resource's
+observed state into another's desired state, so this needed a value
+copied in by hand after every first sync. Confirmed live on a full
+cluster rebuild that nobody had done that manual step, so no cert ever
+got created and the ingresses had no HTTPS at all. Terraform's dependency
+graph resolves the same problem within one `apply`, no manual step.
+
+**Revisited (2026-09-23, 2nd time):** Moved back to Crossplane, once the
+actual gap — no automatic wiring between composed resources — was fixed
+rather than routed around. A `Composition` (`mode: Pipeline`, the
+`function-patch-and-transform` Function) *can* patch a composed
+resource's observed status into the XR's status, then back out into a
+different composed resource's desired spec — the two-hop route around
+"Compositions can't patch directly between sibling composed resources".
+See `charts/env/prod/critical/crossplane/templates/composition-ingresscertificate.yaml`
+and the chart's README for the mechanics.
+
+**Consequences:** Ingress cert provisioning is Crossplane-managed like
+the rest of this stack's on-demand AWS resources, with no manual step —
+matching what Terraform's dependency graph already gave for free, this
+time without needing Terraform for something that isn't core
+infrastructure. Tradeoff: the fix depends on a third-party Composition
+Function staying compatible across Crossplane upgrades, and the
+self-healing convergence (a resource simply isn't created until its
+patched fields resolve) takes one or two reconciles rather than
+completing atomically within a single `apply` the way Terraform's graph
+did — acceptable for a value that only changes when a hostname is added
+or a cert is due for renewal, not on every deploy.

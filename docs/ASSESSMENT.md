@@ -230,10 +230,16 @@ self-healed at the node level, and it was only found by manually running
   agent — or a pipeline — writing credentials into a cluster shouldn't be
   fully automated). Reasonable for a single-operator setup; doesn't scale
   to a team without a proper credential-provisioning mechanism.
-* **The ACM certificate validation flow has no automation linking
-  Certificate → DNS record → CertificateValidation** — currently a
-  manual "read the assigned value, paste it, re-apply" step per
-  certificate, discussed separately as its own follow-up.
+* ~~The ACM certificate validation flow has no automation linking
+  Certificate → DNS record → CertificateValidation~~ **Closed** — the
+  ingress certs are now provisioned by a real Crossplane Composition
+  (`charts/env/prod/critical/crossplane/templates/composition-ingresscertificate.yaml`,
+  a `function-patch-and-transform` pipeline) that wires the Certificate's
+  assigned validation record into the Route53 Record automatically. This
+  is the second attempt: the first Crossplane pass (no Composition, just
+  applied resources) had exactly this manual-copy gap, got reverted to
+  Terraform, then moved back to Crossplane once the actual gap — no
+  automatic wiring — was fixed rather than routed around.
 
 ### Documentation / process
 
@@ -246,9 +252,10 @@ self-healed at the node level, and it was only found by manually running
   — both rewritten to match the current split-repo, private-repo,
   domain/TLS/Crossplane state, including a shared "bugs found by running
   the thing" section kept current in both this doc and `ARCHITECTURE.md`.
-* **Still no CODEOWNERS, no SECURITY.md, no dependency-update
-  automation** (no Dependabot/Renovate config) — unchanged from the first
-  pass.
+* ~~Still no CODEOWNERS~~ **Closed** — added (`.github/CODEOWNERS`), one
+  blanket rule for the current single-operator reality.
+* **Still no SECURITY.md, no dependency-update automation** (no
+  Dependabot/Renovate config) — unchanged from the first pass.
 
 ## Incident response & operational judgment
 

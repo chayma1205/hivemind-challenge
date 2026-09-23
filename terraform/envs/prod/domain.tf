@@ -229,69 +229,20 @@ resource "aws_eks_pod_identity_association" "crossplane_aws_provider" {
   tags = var.tags
 }
 
-# Per-hostname ACM certs for the ALB-fronted ingresses (argocd, greeter) —
-# one each, not a shared wildcard. Back on Terraform, not Crossplane:
-# Crossplane's Certificate/Record/CertificateValidation setup
-# (charts/env/prod/critical/crossplane/templates/certificate*.yaml, now
-# removed) needed a value copied by hand from the Certificate's assigned
-# validation record into the Record resource after every first sync — no
-# Composition existed to wire that automatically. Confirmed live on a
-# fresh cluster rebuild: nobody had done that manual step, so no cert
-# ever got created and the ingresses had no HTTPS at all.
+# Per-hostname ACM certs for the ALB-fronted ingresses (argocd, greeter)
+# are Crossplane-managed, not Terraform-managed — see
+# charts/env/prod/critical/crossplane/templates/composition-ingresscertificate.yaml
+# and .../templates/ingresscertificates.yaml. They briefly lived here
+# instead (Terraform's dependency graph sidesteps the "validation record
+# value isn't known until the cert is requested" problem in one `apply`),
+# after an earlier, function-less Crossplane setup needed that value
+# copied in by hand and nobody ever did it on a fresh cluster rebuild.
+# Moved back to Crossplane once that gap was actually fixed — a real
+# Composition (function-patch-and-transform pipeline) that wires the
+# Certificate's assigned validation record into the Route53 Record
+# automatically, the same way Terraform's graph did. See the crossplane
+# chart's README.md for the full reasoning.
 #
-# Terraform's dependency graph resolves this in one `apply`, no manual
-# step, ever: `domain_validation_options` becomes known once the
-# certificate is requested, within the same graph the validation record
-# and aws_acm_certificate_validation depend on.
-#
-# No certificate-arn is wired into the ingress charts' values.yaml for
-# these — deliberately. The AWS Load Balancer Controller auto-discovers a
-# matching cert by comparing an Ingress's spec.tls[].hosts (and
-# rules[].host) against ACM
-# (https://kubernetes-sigs.github.io/aws-load-balancer-controller/latest/guide/ingress/cert_discovery/),
-# so creating the right cert here is the entire fix — nothing needs to
-# reference its ARN anywhere.
-locals {
-  ingress_hostnames = {
-    argocd  = "argocd.${var.domain_name}"
-    greeter = "greeter.${var.domain_name}"
-  }
-}
-
-resource "aws_acm_certificate" "ingress" {
-  for_each = local.ingress_hostnames
-
-  domain_name       = each.value
-  validation_method = "DNS"
-
-  tags = var.tags
-
-  lifecycle {
-    create_before_destroy = true
-  }
-}
-
-resource "aws_route53_record" "ingress_cert_validation" {
-  for_each = {
-    for k, cert in aws_acm_certificate.ingress : k => one(cert.domain_validation_options)
-    # domain_validation_options is a set (no index access — Terraform
-    # rejects [0] on it, "elements of a set... don't have any separate
-    # index"), but single-hostname (non-SAN) certs always have exactly
-    # one entry, so one(...) — which requires and unwraps exactly one
-    # element — is the correct, safe extraction here, not a workaround.
-  }
-
-  zone_id         = data.aws_route53_zone.this.zone_id
-  name            = each.value.resource_record_name
-  type            = each.value.resource_record_type
-  records         = [each.value.resource_record_value]
-  ttl             = 60
-  allow_overwrite = true
-}
-
-resource "aws_acm_certificate_validation" "ingress" {
-  for_each = aws_acm_certificate.ingress
-
-  certificate_arn         = each.value.arn
-  validation_record_fqdns = [aws_route53_record.ingress_cert_validation[each.key].fqdn]
-}
+# The crossplane_aws_provider Pod Identity role/association above already
+# covers this — scoped to exactly ACM + Route53 on this hosted zone, set
+# up for this purpose from the start.

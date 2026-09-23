@@ -32,20 +32,30 @@ crossplane:
   # Family-specific providers share the same "default" runtime config and
   # ProviderConfig unless given their own.
   #
-  # acm/route53 were installed for the ingress TLS certs; that moved back
-  # to Terraform (terraform/envs/prod/domain.tf — no Composition existed
-  # to link a Certificate's assigned validation record to its Route53
-  # Record automatically, so it needed a manual value copied in after
-  # every first sync, confirmed live to just never happen). Left
-  # installed rather than removed: harmless idle, and this is still the
-  # obvious place to manage a specific per-domain cert or other AWS
-  # resource on demand later — add more packages (provider-aws-s3, ...)
-  # here as needed.
+  # acm/route53 back these charts' own ingress-cert Composition
+  # (templates/composition-ingresscertificate.yaml) — provisions the
+  # per-hostname ACM certs and their Route53 DNS validation records.
+  # Add more packages (provider-aws-s3, ...) here as other AWS resources
+  # move under Crossplane.
   provider:
     packages:
       - xpkg.upbound.io/upbound/provider-family-aws:v2.8.1
       - xpkg.upbound.io/upbound/provider-aws-acm:v2.8.1
       - xpkg.upbound.io/upbound/provider-aws-route53:v2.8.1
+
+  # Composition Functions — the pipeline that renders
+  # templates/composition-ingresscertificate.yaml's composed resources.
+  # function-patch-and-transform does the actual field wiring, including
+  # the cross-resource hop (Certificate's assigned validation record ->
+  # XR status -> Route53 Record) that a plain, function-less Composition
+  # can't express; function-auto-ready rolls up the composed resources'
+  # own Ready conditions into the composite's, so `kubectl get
+  # ingresscertificates` actually reflects reality instead of always
+  # reading Ready.
+  function:
+    packages:
+      - xpkg.upbound.io/crossplane-contrib/function-patch-and-transform:v0.10.9
+      - xpkg.upbound.io/crossplane-contrib/function-auto-ready:v0.7.0
 
   # Pin to the system node group (terraform/envs/prod's
   # eks_managed_node_groups.default: labels role=system, taint
@@ -85,13 +95,25 @@ runtimeConfig:
   serviceAccountName: provider-aws
 
 providerConfig:
-  # Stays disabled until the AWS family provider package above has
-  # finished installing and registered its CRDs (a few minutes after first
-  # sync) — applying a ProviderConfig before then fails with "no matches
-  # for kind ProviderConfig in version aws.upbound.io/v1beta1", the same
+  # Was disabled until the AWS family provider package above finished
+  # installing and registered its CRDs (a few minutes after first sync) —
+  # applying a ProviderConfig before then fails with "no matches for kind
+  # ProviderConfig in version aws.upbound.io/v1beta1", the same
   # bootstrap-ordering problem the cert-manager chart used to solve with
-  # `clusterIssuer.enabled: false`. Flip to true once
-  # `kubectl get providers` shows the family provider HEALTHY=True, then
-  # re-sync.
-  enabled: false
+  # `clusterIssuer.enabled: false`. Confirmed live via `kubectl get
+  # providers` (family/acm/route53 all HEALTHY=True) before flipping this
+  # to true — needs the same re-check after any full cluster rebuild,
+  # before the ingress-cert Composition's resources can do anything.
+  enabled: true
   name: aws-pod-identity
+
+# Feeds templates/ingresscertificates.yaml, which creates one
+# IngressCertificate XR per hostname — each provisions its own ACM cert +
+# Route53 DNS validation record via templates/composition-ingresscertificate.yaml.
+ingressCertificates:
+  region: us-east-1
+  # terraform/envs/prod output `hosted_zone_id` (data.aws_route53_zone.this).
+  zoneId: Z03083393MYD67KYV7VMW
+  hostnames:
+    argocd: argocd.hivemind.chaima.online
+    greeter: greeter.hivemind.chaima.online

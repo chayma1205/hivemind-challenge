@@ -1,0 +1,121 @@
+# Renders an IngressCertificate XR (templates/xrd-ingresscertificate.yaml)
+# into a Certificate + its Route53 validation Record + a
+# CertificateValidation — the same three-resource chain the old
+# hand-applied templates used (see git history:
+# templates/certificate.yaml, certificate-validation-record.yaml,
+# certificatevalidation.yaml, removed in 5f9c4c4), but wired
+# automatically this time via a function pipeline instead of a value
+# copied in by hand.
+#
+# The `certificate` resource's ToCompositeFieldPath patches copy ACM's
+# assigned validation record (only known after the Certificate exists —
+# ACM generates it per-request) into the XR's status. The
+# `validation-record` resource's FromCompositeFieldPath patches read it
+# back out. This two-hop dance through the XR is standard practice for
+# wiring one composed resource's observed state into another's desired
+# state — a Composition can't patch directly between sibling composed
+# resources.
+#
+# Left at the default (Required) fromFieldPath policy on those patches,
+# deliberately: on the first reconcile, before the Certificate has been
+# observed, the source field doesn't exist yet, so function-patch-and-transform
+# skips adding the `validation-record`/`certificate-validation` resources
+# to desired state entirely for that pass rather than creating them with
+# blank fields. Crossplane reconciles composites on every observed change
+# to a composed resource, not just on a timer, so this converges within
+# one or two reconciles of the Certificate actually existing — no manual
+# step, ever.
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: ingresscertificate.hivemind.io
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+spec:
+  compositeTypeRef:
+    apiVersion: hivemind.io/v1alpha1
+    kind: IngressCertificate
+  mode: Pipeline
+  pipeline:
+    - step: patch-and-transform
+      functionRef:
+        name: function-patch-and-transform
+      input:
+        apiVersion: pt.fn.crossplane.io/v1beta1
+        kind: Resources
+        resources:
+          - name: certificate
+            base:
+              apiVersion: acm.aws.m.upbound.io/v1beta1
+              kind: Certificate
+              spec:
+                providerConfigRef:
+                  name: {{ .Values.providerConfig.name }}
+                forProvider:
+                  validationMethod: DNS
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.domainName
+                toFieldPath: spec.forProvider.domainName
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.region
+                toFieldPath: spec.forProvider.region
+              - type: ToCompositeFieldPath
+                fromFieldPath: status.atProvider.arn
+                toFieldPath: status.certificateArn
+              - type: ToCompositeFieldPath
+                # Single-hostname (non-SAN) certs always have exactly one
+                # validation option — same reasoning as
+                # terraform/envs/prod/domain.tf's old `one(...)` extraction.
+                fromFieldPath: status.atProvider.domainValidationOptions[0].resourceRecordName
+                toFieldPath: status.validationRecordName
+              - type: ToCompositeFieldPath
+                fromFieldPath: status.atProvider.domainValidationOptions[0].resourceRecordType
+                toFieldPath: status.validationRecordType
+              - type: ToCompositeFieldPath
+                fromFieldPath: status.atProvider.domainValidationOptions[0].resourceRecordValue
+                toFieldPath: status.validationRecordValue
+
+          - name: validation-record
+            base:
+              apiVersion: route53.aws.m.upbound.io/v1beta1
+              kind: Record
+              spec:
+                providerConfigRef:
+                  name: {{ .Values.providerConfig.name }}
+                forProvider:
+                  ttl: 60
+                  allowOverwrite: true
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.zoneId
+                toFieldPath: spec.forProvider.zoneId
+              - type: FromCompositeFieldPath
+                fromFieldPath: status.validationRecordName
+                toFieldPath: spec.forProvider.name
+              - type: FromCompositeFieldPath
+                fromFieldPath: status.validationRecordType
+                toFieldPath: spec.forProvider.type
+              - type: FromCompositeFieldPath
+                fromFieldPath: status.validationRecordValue
+                toFieldPath: spec.forProvider.records[0]
+
+          - name: certificate-validation
+            base:
+              apiVersion: acm.aws.m.upbound.io/v1beta1
+              kind: CertificateValidation
+              spec:
+                providerConfigRef:
+                  name: {{ .Values.providerConfig.name }}
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.region
+                toFieldPath: spec.forProvider.region
+              - type: FromCompositeFieldPath
+                fromFieldPath: status.certificateArn
+                toFieldPath: spec.forProvider.certificateArn
+
+    - step: auto-ready
+      functionRef:
+        name: function-auto-ready

@@ -1,0 +1,23 @@
+# One IngressCertificate XR per ALB-fronted ingress hostname
+# (values.yaml's ingressCertificates.hostnames) — each provisions its own
+# ACM cert via templates/composition-ingresscertificate.yaml. No
+# certificate-arn is wired into either ingress chart's values.yaml:
+# the AWS Load Balancer Controller auto-discovers a matching cert by
+# comparing an Ingress's spec.tls[].hosts against ACM
+# (https://kubernetes-sigs.github.io/aws-load-balancer-controller/latest/guide/ingress/cert_discovery/),
+# so creating the right cert here is the entire fix.
+{{- range $key, $domain := .Values.ingressCertificates.hostnames }}
+---
+apiVersion: hivemind.io/v1alpha1
+kind: IngressCertificate
+metadata:
+  name: {{ $key }}
+  namespace: {{ $.Release.Namespace }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+spec:
+  domainName: {{ $domain | quote }}
+  zoneId: {{ $.Values.ingressCertificates.zoneId | quote }}
+  region: {{ $.Values.ingressCertificates.region | quote }}
+{{- end }}

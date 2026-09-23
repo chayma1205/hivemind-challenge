@@ -1,0 +1,61 @@
+# Defines the IngressCertificate composite resource type: a per-hostname
+# ACM cert + its Route53 DNS validation record, as one object an ingress
+# owner can create directly (see templates/ingresscertificates.yaml for
+# the actual instances). `scope: Namespaced` is Crossplane v2's direct
+# usage mode — no Claim indirection needed, the XR itself is a normal
+# namespaced object.
+apiVersion: apiextensions.crossplane.io/v1
+kind: CompositeResourceDefinition
+metadata:
+  name: ingresscertificates.hivemind.io
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+spec:
+  scope: Namespaced
+  group: hivemind.io
+  names:
+    kind: IngressCertificate
+    plural: ingresscertificates
+  versions:
+    - name: v1alpha1
+      served: true
+      referenceable: true
+      additionalPrinterColumns:
+        - name: Domain
+          type: string
+          jsonPath: .spec.domainName
+        - name: Certificate-Arn
+          type: string
+          jsonPath: .status.certificateArn
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                domainName:
+                  type: string
+                  description: Hostname the ACM cert is issued for.
+                zoneId:
+                  type: string
+                  description: Route53 hosted zone ID to write the DNS validation record into.
+                region:
+                  type: string
+                  description: AWS region to create the cert in.
+                  default: us-east-1
+              required:
+                - domainName
+                - zoneId
+            status:
+              type: object
+              properties:
+                certificateArn:
+                  type: string
+                validationRecordName:
+                  type: string
+                validationRecordType:
+                  type: string
+                validationRecordValue:
+                  type: string

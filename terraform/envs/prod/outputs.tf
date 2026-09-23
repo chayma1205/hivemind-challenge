@@ -79,11 +79,6 @@ output "crossplane_aws_provider_iam_role_arn" {
   value       = module.crossplane_aws_provider_pod_identity.iam_role_arn
 }
 
-output "ingress_acm_certificate_arns" {
-  description = "ARNs of the per-hostname ACM certs for the ALB ingresses (domain.tf's aws_acm_certificate.ingress), keyed the same as local.ingress_hostnames (\"argocd\", \"greeter\"). Not referenced by either ingress chart's values.yaml — the ALB controller auto-discovers these by hostname (see domain.tf's comment on aws_acm_certificate.ingress); this output exists for visibility/debugging, not because anything consumes it."
-  value       = { for k, v in aws_acm_certificate_validation.ingress : k => v.certificate_arn }
-}
-
 output "argocd_image_updater_iam_role_arn" {
   description = "IRSA role ARN for argocd-image-updater's ECR read access — set in that chart's serviceAccount.annotations."
   value       = module.argocd_image_updater_irsa.iam_role_arn

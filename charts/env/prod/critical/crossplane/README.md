@@ -39,13 +39,10 @@ IRSA:
 ### IAM role scope
 
 `aws_iam_role.crossplane_aws_provider` in `domain.tf` is scoped to ACM +
-Route53. Currently unused by anything live (see below for why) — kept as
-a ready-to-use starting scope rather than reverted to a placeholder,
-since it's already narrow (one hosted zone, no wildcard resources) and
-this is the obvious place to manage a specific per-domain cert or other
-AWS resource on demand. Narrow or widen it as actual usage emerges.
+Route53 — exactly what the ingress-cert Composition below needs. Narrow
+or widen it as actual usage grows beyond that.
 
-### ⚠️ `providerConfig.enabled: false` until the provider is healthy
+### `providerConfig.enabled: true` requires the provider to be healthy first
 
 `providers.aws.upbound.io`'s CRDs (including `ProviderConfig` itself)
 don't exist until `provider-family-aws` finishes installing — a few
@@ -53,33 +50,64 @@ minutes after first sync. Applying the `ProviderConfig` before then fails
 with `no matches for kind "ProviderConfig" in version
 "aws.upbound.io/v1beta1"`. Same bootstrap-ordering issue the
 [`cert-manager`](../../../../../docs/ARCHITECTURE.md) setup solved with
-`clusterIssuer.enabled: false` before a real domain existed. Once
-`kubectl get providers` shows `provider-family-aws` `HEALTHY=True`, flip
-`providerConfig.enabled: true` and re-sync (or let Argo CD self-heal pick
-it up next pass).
+`clusterIssuer.enabled: false` before a real domain existed. On a fresh
+cluster, this value starts effectively unusable until `kubectl get
+providers` shows `provider-family-aws` `HEALTHY=True` — if it's not yet,
+temporarily set `providerConfig.enabled: false`, wait, then flip it back
+and re-sync (or let Argo CD self-heal pick it up once the CRDs exist).
 
-## What Crossplane doesn't manage (anymore): the ingress certs
+## What Crossplane manages: the ingress certs
 
-The ingress TLS certs (argocd/greeter) were briefly Crossplane-managed —
-a `Certificate` + `Record` + `CertificateValidation` trio
-(`acm.aws.upbound.io`/`route53.aws.upbound.io`). Moved back to Terraform
-(`terraform/envs/prod/domain.tf`'s `aws_acm_certificate.ingress`, one per
-hostname): the Record's validation CNAME name/value are only known after
-ACM assigns them when the Certificate is requested, and this repo had no
-Crossplane Composition to wire that automatically — it needed a value
-copied by hand into `values.yaml` after every first sync. Confirmed live
-on a full cluster rebuild: nobody had done that manual step, so no cert
-ever got created and the ingresses had no HTTPS at all. Terraform's
-dependency graph resolves the same problem in one `apply`, no manual step
-— see `domain.tf`'s comment on `aws_acm_certificate.ingress` for the
-full reasoning, and `docs/DECISIONS.md`/`docs/ASSESSMENT.md` for this as
-a recorded architecture decision, not just a bug fix.
+The ingress TLS certs (argocd/greeter) are provisioned by the
+`IngressCertificate` composite resource type defined in
+[`templates/xrd-ingresscertificate.yaml`](templates/xrd-ingresscertificate.yaml):
+one instance per hostname
+([`templates/ingresscertificates.yaml`](templates/ingresscertificates.yaml),
+driven by `values.yaml`'s `ingressCertificates.hostnames`), each rendered
+by
+[`templates/composition-ingresscertificate.yaml`](templates/composition-ingresscertificate.yaml)
+into a `Certificate` + Route53 validation `Record` + `CertificateValidation`
+(`acm.aws.m.upbound.io`/`route53.aws.m.upbound.io`).
 
-`provider-aws-acm`/`provider-aws-route53` stay installed (see
-`values.yaml`) — harmless idle, and the natural place to manage a
-specific per-domain cert or other AWS resource through Crossplane again
-later, on purpose, ideally with a real Composition this time rather than
-a manual-value gate.
+This is the second attempt at Crossplane-managed certs. The first
+(`Certificate`/`Record`/`CertificateValidation` applied directly, no
+Composition — see git history) hit a real gap: the Record's validation
+CNAME name/value are only known after ACM assigns them when the
+Certificate is requested, and a Composition-less setup has no way to
+patch one composed resource's observed state into another's desired
+state — it needed a value copied in by hand after every first sync.
+Confirmed live on a full cluster rebuild that nobody had done that
+manual step, so no cert ever got created and the ingresses had no HTTPS.
+Moved to Terraform after that (its dependency graph resolves the same
+problem in one `apply`), then back here once the actual gap — no
+automatic wiring — was fixed with a real Composition.
+
+The fix: a `mode: Pipeline` Composition running the
+`function-patch-and-transform` Function, which *can* patch a composed
+resource's status into the XR's status (`ToCompositeFieldPath`) and then
+back out into a different composed resource's spec
+(`FromCompositeFieldPath`) — the two-hop route around "Compositions can't
+patch directly between sibling composed resources". The
+`validation-record`/`certificate-validation` resources' patches are left
+at the function's default (`Required`) `fromFieldPath` policy on purpose:
+before the Certificate has been observed, the source field doesn't
+exist, so the function skips adding those resources to desired state for
+that reconcile instead of creating them with blank fields. Crossplane
+reconciles a composite on every observed change to its composed
+resources (not just on a timer), so this converges within one or two
+reconciles of the Certificate actually existing — no manual step.
+`function-auto-ready` is chained after it so the XR's own `Ready`
+condition reflects whether all three composed resources are actually
+ready, instead of always reading `Ready` regardless of real state.
+
+No `certificate-arn` is wired into either ingress chart's `values.yaml`
+— deliberately. The AWS Load Balancer Controller auto-discovers a
+matching cert by comparing an Ingress's `spec.tls[].hosts` against ACM
+(https://kubernetes-sigs.github.io/aws-load-balancer-controller/latest/guide/ingress/cert_discovery/),
+so creating the right cert is the entire fix.
+
+`docs/DECISIONS.md`/`docs/ASSESSMENT.md` record this back-and-forth as
+an architecture decision, not just a bug fix.
 
 ## Install
 

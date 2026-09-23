@@ -14,13 +14,13 @@ their own answer.
 | What | Where it lives | Recovers how |
 |---|---|---|
 | Terraform state | `s3://hivemind-challenge-greeter-tfstate/envs/prod/terraform.tfstate` — versioned, S3-native-locked | Automatic (S3 versioning) unless the bucket itself is deleted — see [Scenario: state bucket lost](#scenario-terraform-state-bucket-lost) |
-| Infra definitions (VPC, EKS, IAM, ECR, Route53 records/IAM, ACM) | `terraform/envs/prod/*.tf` in this repo (git) | `terraform apply` from a fresh clone |
+| Infra definitions (VPC, EKS, IAM, ECR, Route53 zone lookup + Pod Identity IAM) | `terraform/envs/prod/*.tf` in this repo (git) | `terraform apply` from a fresh clone |
 | GitOps definitions (what Argo CD runs) | `charts/env/prod/**` + `argocd-apps.yaml` in this repo (git) | Automatic once Argo CD is bootstrapped (self-managing root Application, see below) |
 | App source + build pipeline | Separate repo: `github.com/chayma1205/hivemind-greeter` | Independent of this repo; re-clone + re-run CI |
 | Container images | ECR (`hivemind-greeter`, `hivemind-greeter-signatures`) | **Not backed up** — lost if the repos are deleted. Rebuildable from `hivemind-greeter` git history, but re-signing needs a fresh CI run (new signatures, same image bytes) |
 | Route53 public hosted zone (`hivemind.chaima.online`) | Created **out-of-band**, not Terraform-managed — `domain.tf` only does `data "aws_route53_zone"` lookup | **Not recoverable by this repo.** If the zone is deleted, someone has to recreate it and redo NS delegation from the parent `chaima.online` zone/registrar by hand. This is the single biggest single-point-of-failure in the whole stack. |
 | DNS records inside that zone | Managed by external-dns from live Ingress state | Automatic — external-dns reconciles every ~60s once it and the ingresses exist again |
-| ACM wildcard cert | AWS ACM (currently Terraform-managed pending migration to Crossplane — see `docs/DECISIONS.md`) | Recreatable, but DNS-validation needs the hosted zone above to exist first |
+| ACM ingress certs (argocd, greeter) | AWS ACM, Crossplane-managed (`charts/env/prod/critical/crossplane` — see `docs/DECISIONS.md` #12) | Recreatable, but DNS-validation needs the hosted zone above to exist first, and Crossplane's AWS provider (Pod Identity) to be healthy |
 | Git credentials (2 SSH deploy keys: repo-server read-only, Image Updater write) | **Only as GitHub deploy keys + the two K8s Secrets in the `argocd` namespace.** Not stored anywhere else — not in git (correctly), not in a password manager as far as this repo knows. | **Not recoverable — must be regenerated.** See [Scenario: cluster lost](#scenario-full-cluster-loss). |
 | Kubernetes workload state (Deployments, etc.) | Rendered from Helm charts in git, applied by Argo CD | Automatic |
 | Application data | None — greeter is stateless; Crossplane manages external AWS resources, not in-cluster data | N/A |
@@ -231,10 +231,11 @@ here (Image Updater will just overwrite a hand-edit on its next cycle).
   workflow run loses access immediately on its next AWS API call.
 - **An IAM role used by a Pod Identity association (external-dns,
   cert-manager, Crossplane) is suspected compromised:** the blast radius
-  is bounded by design — each is scoped to one hosted zone or, for
-  Crossplane, currently a placeholder (see `docs/DECISIONS.md`). Rotate
-  by tainting and reapplying the specific `aws_iam_role` resource; the
-  Pod Identity association re-binds to the new role automatically.
+  is bounded by design — each is scoped to one hosted zone; Crossplane's
+  is also scoped to ACM (used by its ingress-cert Composition, see
+  `docs/DECISIONS.md` #12). Rotate by tainting and reapplying the
+  specific module/`aws_iam_role` resource in `domain.tf`; the Pod
+  Identity association re-binds to the new role automatically.
 
 ## Post-recovery checklist
 
