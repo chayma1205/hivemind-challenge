@@ -266,6 +266,32 @@ module "eks" {
         }
       })
     }
+    # Prerequisite for persistent storage (PersistentVolumeClaims backed by
+    # EBS) — nothing in this cluster needed it before now. Pod Identity
+    # association + IAM role below, same pattern as every other addon
+    # here; role ARN wired via configuration_values since the addon's own
+    # schema takes it directly, unlike the Pod-Identity-only addons above
+    # that pick up their association purely by namespace/service-account
+    # match.
+    aws-ebs-csi-driver = {
+      addon_version               = "v1.66.0-eksbuild.1"
+      resolve_conflicts_on_update = "OVERWRITE"
+      configuration_values = jsonencode({
+        controller = {
+          replicaCount = 2
+          nodeSelector = { role = "system" }
+          tolerations = [{
+            key      = "CriticalAddonsOnly"
+            operator = "Equal"
+            value    = "true"
+            effect   = "NoSchedule"
+          }]
+        }
+        # node daemonset is left at its schema default (tolerations:
+        # [{operator: Exists}]) — it has to run on every node that might
+        # mount an EBS volume, not just the system group.
+      })
+    }
   }
 
   # Lets Karpenter discover this security group for nodes it launches —
@@ -330,6 +356,50 @@ module "eks" {
       }
     }
   }
+
+  tags = var.tags
+}
+
+# Pod Identity role for the aws-ebs-csi-driver addon above. Same
+# iam-assumable-role / role_requires_mfa=false pattern as
+# domain.tf's Pod Identity roles (see that file's comment on
+# module "external_dns_pod_identity" for why role_requires_mfa must be
+# false) — kept here rather than domain.tf since this has nothing to do
+# with the hosted zone/DNS, it's core cluster storage plumbing.
+#
+# AmazonEBSCSIDriverPolicyV2 (AWS-managed, not hand-rolled): this is
+# exactly the kind of broad-but-well-maintained policy worth using
+# as-is — EBS volume lifecycle (create/attach/detach/delete/snapshot)
+# needs permissions across arbitrary future volume/snapshot IDs that
+# don't exist yet at plan time, so there's no useful narrower resource
+# scope to hand-write, and AWS keeps this policy current as the driver's
+# own permission needs evolve.
+module "ebs_csi_pod_identity" {
+  source  = "terraform-aws-modules/iam/aws//modules/iam-assumable-role"
+  version = "~> 5.39"
+
+  create_role = true
+  role_name   = "${var.cluster_name}-ebs-csi-driver"
+
+  trusted_role_services = ["pods.eks.amazonaws.com"]
+  role_requires_mfa     = false
+
+  tags = var.tags
+}
+
+resource "aws_iam_role_policy_attachment" "ebs_csi_driver" {
+  role       = module.ebs_csi_pod_identity.iam_role_name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicyV2"
+}
+
+resource "aws_eks_pod_identity_association" "ebs_csi_driver" {
+  cluster_name = module.eks.cluster_name
+  # Service account name confirmed via:
+  #   aws eks describe-addon-configuration --addon-name aws-ebs-csi-driver \
+  #     --addon-version <version> --query podIdentityConfiguration
+  namespace       = "kube-system"
+  service_account = "ebs-csi-controller-sa"
+  role_arn        = module.ebs_csi_pod_identity.iam_role_arn
 
   tags = var.tags
 }

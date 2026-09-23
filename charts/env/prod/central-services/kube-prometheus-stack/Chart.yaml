@@ -1,0 +1,11 @@
+apiVersion: v2
+name: kube-prometheus-stack
+description: Provisions Prometheus, Alertmanager, Grafana, and cluster/node metrics collection for the prod EKS cluster
+type: application
+version: 0.1.0
+appVersion: "0.94.0"
+
+dependencies:
+  - name: kube-prometheus-stack
+    version: "91.5.0"
+    repository: https://prometheus-community.github.io/helm-charts

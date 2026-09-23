@@ -1,0 +1,45 @@
+# Custom alert rule, on top of the subchart's large set of defaults
+# (kube-prometheus-stack ships KubePodCrashLooping and friends out of the
+# box — no need to hand-roll those). This one exists to close a specific,
+# previously-live gap (see docs/ASSESSMENT.md, "bugs found only by
+# running the thing" #5): a Karpenter node's kubelet stopped posting
+# status entirely and nothing paged anyone for hours.
+#
+# No `release:`-label requirement to match Prometheus's ruleSelector —
+# values.yaml sets `ruleSelectorNilUsesHelmValues: false`, so Prometheus
+# watches every PrometheusRule in the cluster regardless of labels (see
+# that value's own comment for why that's fine on a single-tenant
+# cluster).
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: node-health
+spec:
+  groups:
+    - name: node-health
+      rules:
+        - alert: NodeNotReadyTooLong
+          # kube_node_status_condition{condition="Ready", status="true"}
+          # is 1 when the node IS Ready, 0 otherwise — covers both
+          # Ready=False and Ready=Unknown (the actual state the hung node
+          # was in) in one expression, not just the False case.
+          expr: kube_node_status_condition{condition="Ready", status="true"} == 0
+          # Shorter than Karpenter's own node-auto-repair threshold
+          # (charts/env/prod/critical/karpenter's
+          # settings.featureGates.nodeRepair, 30m) so a human finds out
+          # *before* Karpenter would have silently replaced the node on
+          # its own — visibility into the failure, not just automatic
+          # remediation of it.
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Node {{ "{{" }} $labels.node {{ "}}" }} has not been Ready for over 10 minutes"
+            description: >-
+              Node {{ "{{" }} $labels.node {{ "}}" }} has reported a
+              non-Ready condition for more than 10 minutes. Karpenter's
+              node-auto-repair feature gate will terminate and replace it
+              automatically after 30 minutes if it's a Karpenter-managed
+              node; this alert exists to surface the problem before that
+              happens, and to catch it at all on nodes auto-repair
+              doesn't cover (the EKS-managed system node group).

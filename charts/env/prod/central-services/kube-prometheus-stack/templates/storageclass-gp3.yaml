@@ -1,0 +1,30 @@
+# A gp3 StorageClass for this chart's Prometheus/Alertmanager/Grafana
+# PersistentVolumeClaims (values.yaml's storageClassName: gp3
+# references). Not the cluster's `gp2` StorageClass (the EKS default,
+# legacy in-tree `kubernetes.io/aws-ebs` provisioner) — gp3 is cheaper
+# per-GB than gp2 at the same baseline performance and is what the
+# aws-ebs-csi-driver addon (terraform/envs/prod/main.tf) actually exists
+# to provision.
+#
+# Defined explicitly here rather than via the addon's own
+# `defaultStorageClass.enabled: true` config knob — that creates *a*
+# StorageClass, but not with the specific parameters (encryption,
+# WaitForFirstConsumer, DeleteOnTermination reclaim) this chart wants,
+# and it isn't scoped to just this chart's volumes either.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: gp3
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+provisioner: ebs.csi.aws.com
+parameters:
+  type: gp3
+  encrypted: "true"
+reclaimPolicy: Delete
+# Delays volume creation until a Pod using it is actually scheduled, so
+# the EBS volume lands in the same AZ as the node — the default
+# (Immediate) can create a volume in an AZ with no matching node, leaving
+# the Pod permanently unschedulable.
+volumeBindingMode: WaitForFirstConsumer
+allowVolumeExpansion: true

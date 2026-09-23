@@ -38,7 +38,7 @@ terraform/
   envs/prod/                  VPC, EKS, IAM/Pod Identity, ECR, Route53/ACM
 charts/env/prod/
   critical/                   Karpenter, ALB controller, Crossplane — cluster-scoped, one per cluster
-  central-services/            Argo CD, Argo CD Image Updater
+  central-services/            Argo CD, Argo CD Image Updater, kube-prometheus-stack
   apps/greeter/                 The app's Helm chart (image built elsewhere)
   argocd-apps.yaml              Generated Argo CD Application set — don't hand-edit
 scripts/

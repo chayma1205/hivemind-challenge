@@ -84,6 +84,11 @@ output "argocd_image_updater_iam_role_arn" {
   value       = module.argocd_image_updater_irsa.iam_role_arn
 }
 
+output "ebs_csi_driver_iam_role_arn" {
+  description = "IAM role ARN for the aws-ebs-csi-driver EKS addon — bound via the EKS Pod Identity association in main.tf."
+  value       = module.ebs_csi_pod_identity.iam_role_arn
+}
+
 output "github_actions_ecr_push_role_arn" {
   description = "OIDC role ARN GitHub Actions assumes to push to ECR — set as AWS_ROLE_ARN in .github/workflows/cd.yml."
   value       = module.github_actions_ecr_push_irsa.arn

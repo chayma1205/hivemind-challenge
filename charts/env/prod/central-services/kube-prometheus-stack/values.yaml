@@ -1,0 +1,173 @@
+# Values passed through to the kube-prometheus-stack subchart (dependency
+# name: kube-prometheus-stack).
+# Full reference: https://github.com/prometheus-community/helm-charts/blob/kube-prometheus-stack-91.5.0/charts/kube-prometheus-stack/values.yaml
+kube-prometheus-stack:
+  # EKS doesn't expose these control-plane components to customers the way
+  # a self-managed cluster would (no node running kube-scheduler/
+  # kube-controller-manager/etcd is ever visible to us, and kube-proxy's
+  # metrics endpoint isn't reachable the way this chart expects either) —
+  # left at the chart's own defaults, every target here would sit
+  # permanently "down" and generate noise instead of signal. Disabled
+  # up front rather than discovered as another live-only bug.
+  kubeControllerManager:
+    enabled: false
+  kubeScheduler:
+    enabled: false
+  kubeEtcd:
+    enabled: false
+  kubeProxy:
+    enabled: false
+
+  prometheusOperator:
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        memory: 256Mi
+    # Deliberately NOT pinned to the system node group (role: system),
+    # unlike charts/env/prod/critical/'s charts (Karpenter, the ALB
+    # controller, Crossplane). Those are pinned because they're
+    # bootstrap-order-sensitive — Karpenter has to be running before it
+    # can provision the capacity everything else needs. This is a central
+    # service (observability for the whole cluster — same category as
+    # ../argocd, not ../../critical/karpenter), with no such circularity,
+    # so it's left for Karpenter to place and size like any other
+    # workload. Confirmed live before writing this: the two system-group
+    # nodes are already at 86%/67% CPU *requests* — pinning this stack
+    # there on top of that would have been a self-inflicted
+    # resource-pressure problem, not a safety improvement.
+    admissionWebhooks:
+      patch:
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+
+  prometheus:
+    prometheusSpec:
+      replicas: 1
+      retention: 15d
+      resources:
+        requests:
+          cpu: 250m
+          memory: 512Mi
+        limits:
+          memory: 1Gi
+      storageSpec:
+        volumeClaimTemplate:
+          spec:
+            storageClassName: gp3
+            accessModes: ["ReadWriteOnce"]
+            resources:
+              requests:
+                # ~15d retention at this cluster's current scale (a
+                # handful of workloads, 3 nodes) comfortably fits well
+                # under this; sized with headroom rather than tuned tight,
+                # since `allowVolumeExpansion: true` on the gp3
+                # StorageClass (templates/storageclass-gp3.yaml) makes
+                # growing it later a live, non-disruptive resize anyway.
+                storage: 20Gi
+      # Scrapes every ServiceMonitor/PodMonitor/PrometheusRule in the
+      # cluster, not just ones with a matching release label — this is a
+      # single-tenant cluster (one team, one Prometheus), so the usual
+      # multi-tenant "only watch my own namespace's monitors" restriction
+      # just means remembering to label every future ServiceMonitor
+      # correctly for no real isolation benefit.
+      serviceMonitorSelectorNilUsesHelmValues: false
+      podMonitorSelectorNilUsesHelmValues: false
+      probeSelectorNilUsesHelmValues: false
+      ruleSelectorNilUsesHelmValues: false
+
+  alertmanager:
+    alertmanagerSpec:
+      replicas: 1
+      resources:
+        requests:
+          cpu: 50m
+          memory: 64Mi
+        limits:
+          memory: 128Mi
+      storage:
+        volumeClaimTemplate:
+          spec:
+            storageClassName: gp3
+            accessModes: ["ReadWriteOnce"]
+            resources:
+              requests:
+                # Small on purpose — this only persists Alertmanager's own
+                # notification/silence state (so a pod restart doesn't
+                # re-fire every currently-active alert), not metrics data.
+                storage: 2Gi
+    # No real receiver wired yet — deliberately. Alerts are fully visible
+    # and queryable (Prometheus, Alertmanager UI, Grafana) but nothing
+    # pages anyone until a receiver (Slack/SES/PagerDuty/...) is chosen
+    # and its credentials provisioned. See this chart's README for how to
+    # add one without rethinking anything else here.
+    config:
+      route:
+        receiver: "null"
+        group_by: ["alertname", "namespace"]
+        group_wait: 30s
+        group_interval: 5m
+        repeat_interval: 12h
+      receivers:
+        - name: "null"
+
+  grafana:
+    replicas: 1
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        memory: 256Mi
+    persistence:
+      enabled: true
+      storageClassName: gp3
+      # Dashboards themselves are re-provisioned from this chart's
+      # sidecar config on every restart either way; this just keeps
+      # anything created/changed through the Grafana UI itself (ad hoc
+      # dashboards, org settings) from being lost on a pod reschedule.
+      size: 2Gi
+    # Admin credentials: left unset here on purpose, which makes the
+    # subchart generate a random password into a Secret
+    # (<release>-grafana) rather than a value sitting in this repo's git
+    # history. Retrieve it with:
+    #   kubectl get secret -n <namespace> <release>-grafana \
+    #     -o jsonpath='{.data.admin-password}' | base64 -d
+    #
+    # No ingress configured yet — deliberately, same reasoning as the
+    # null Alertmanager receiver: this stack should exist and be
+    # reachable via port-forward first, get an ingress (and a Crossplane
+    # IngressCertificate, matching charts/env/prod/critical/crossplane's
+    # pattern) once it's actually being used day to day.
+    ingress:
+      enabled: false
+    sidecar:
+      dashboards:
+        enabled: true
+        # Ships Kubernetes cluster/node/pod dashboards out of the box —
+        # not hand-building dashboards for things Grafana Labs already
+        # maintains well.
+        defaultDashboardsEnabled: true
+
+  prometheus-node-exporter:
+    # A DaemonSet, same as the aws-secrets-store-csi-driver-provider addon
+    # in terraform/envs/prod/main.tf — it has to run on every node,
+    # including the two tainted system-group ones, or those two nodes
+    # (already the most resource-constrained in the cluster) would be the
+    # ones with zero node-level metrics. No nodeSelector; a broad
+    # toleration covers scheduling onto the tainted nodes without
+    # requiring them.
+    tolerations:
+      - key: CriticalAddonsOnly
+        operator: Exists
+
+  kube-state-metrics:
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        memory: 256Mi
