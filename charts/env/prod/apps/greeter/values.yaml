@@ -50,15 +50,14 @@ ingress:
     alb.ingress.kubernetes.io/healthcheck-path: /
     alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS": 443}]'
     alb.ingress.kubernetes.io/ssl-redirect: "443"
-    # TODO: the wildcard cert for *.hivemind.chaima.online is managed by
-    # Crossplane now (charts/env/prod/critical/crossplane), not Terraform.
-    # Once its Certificate/CertificateValidation are synced and ISSUED:
-    #   kubectl get certificatevalidation wildcard -n crossplane-system \
-    #     -o jsonpath='{.spec.forProvider.certificateArn}'
-    # (or read Certificate wildcard's status.atProvider.arn directly).
-    # Left blank so the ALB controller fails loudly (no HTTPS listener)
-    # rather than serving unencrypted.
-    alb.ingress.kubernetes.io/certificate-arn: ""
+    # No certificate-arn annotation, deliberately: the ALB controller
+    # auto-discovers a matching ACM cert by comparing this Ingress's
+    # spec.tls[].hosts (and rules[].host) against certificates in ACM
+    # (https://kubernetes-sigs.github.io/aws-load-balancer-controller/latest/guide/ingress/cert_discovery/)
+    # — terraform/envs/prod/domain.tf provisions a real, dedicated
+    # per-hostname cert for exactly this host, fully automatically (one
+    # `terraform apply`, no manual ARN copy-paste). Set this annotation
+    # explicitly only if that discovery ever needs overriding.
   host: greeter.hivemind.chaima.online
 
 resources:

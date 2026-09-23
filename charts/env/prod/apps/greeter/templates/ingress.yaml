@@ -9,6 +9,9 @@ metadata:
     {{- toYaml .Values.ingress.annotations | nindent 4 }}
 spec:
   ingressClassName: {{ .Values.ingress.ingressClassName }}
+  tls:
+    - hosts:
+        - {{ .Values.ingress.host | quote }}
   rules:
     - host: {{ .Values.ingress.host | quote }}
       http:

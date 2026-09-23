@@ -39,8 +39,11 @@ IRSA:
 ### IAM role scope
 
 `aws_iam_role.crossplane_aws_provider` in `domain.tf` is scoped to ACM +
-Route53 — what Crossplane actually manages today (see below). Narrow or
-widen it as more Crossplane-managed resource types are added.
+Route53. Currently unused by anything live (see below for why) — kept as
+a ready-to-use starting scope rather than reverted to a placeholder,
+since it's already narrow (one hosted zone, no wildcard resources) and
+this is the obvious place to manage a specific per-domain cert or other
+AWS resource on demand. Narrow or widen it as actual usage emerges.
 
 ### ⚠️ `providerConfig.enabled: false` until the provider is healthy
 
@@ -55,44 +58,28 @@ with `no matches for kind "ProviderConfig" in version
 `providerConfig.enabled: true` and re-sync (or let Argo CD self-heal pick
 it up next pass).
 
-## What Crossplane manages: the wildcard ingress cert
+## What Crossplane doesn't manage (anymore): the ingress certs
 
-The ACM cert for `*.hivemind.chaima.online` (argocd/greeter ingress TLS —
-see `terraform/envs/prod/domain.tf`'s comment on why this is ACM, not
-cert-manager) used to be Terraform-managed. It's Crossplane-managed now:
+The ingress TLS certs (argocd/greeter) were briefly Crossplane-managed —
+a `Certificate` + `Record` + `CertificateValidation` trio
+(`acm.aws.upbound.io`/`route53.aws.upbound.io`). Moved back to Terraform
+(`terraform/envs/prod/domain.tf`'s `aws_acm_certificate.ingress`, one per
+hostname): the Record's validation CNAME name/value are only known after
+ACM assigns them when the Certificate is requested, and this repo had no
+Crossplane Composition to wire that automatically — it needed a value
+copied by hand into `values.yaml` after every first sync. Confirmed live
+on a full cluster rebuild: nobody had done that manual step, so no cert
+ever got created and the ingresses had no HTTPS at all. Terraform's
+dependency graph resolves the same problem in one `apply`, no manual step
+— see `domain.tf`'s comment on `aws_acm_certificate.ingress` for the
+full reasoning, and `docs/DECISIONS.md`/`docs/ASSESSMENT.md` for this as
+a recorded architecture decision, not just a bug fix.
 
-* [`templates/certificate.yaml`](templates/certificate.yaml) — the
-  `Certificate` (`acm.aws.upbound.io`), DNS validation method.
-* [`templates/certificate-validation-record.yaml`](templates/certificate-validation-record.yaml) —
-  the Route53 CNAME that proves domain ownership.
-* [`templates/certificatevalidation.yaml`](templates/certificatevalidation.yaml) —
-  `CertificateValidation`, which blocks until ACM sees the record above
-  and marks the cert `ISSUED`. Its `certificateArnRef` resolves the cert's
-  ARN automatically — that's a native Crossplane cross-resource reference,
-  no manual wiring needed for that part.
-
-### ⚠️ One manual value, once, after first sync
-
-ACM assigns the validation CNAME's name/value *when the `Certificate` is
-requested* — there's no way to know it ahead of time, and this repo has no
-Crossplane Composition to wire the two resources together automatically
-(would need a full XRD + function-pipeline Composition, not attempted
-here). So:
-
-1. `domainCertificate.enabled: true`, sync, wait for the family provider's
-   ACM sub-package to install and `Certificate wildcard` to exist.
-2. Read the assigned record:
-   ```bash
-   kubectl get certificate wildcard -n crossplane-system \
-     -o jsonpath='{.status.atProvider.domainValidationOptions}'
-   ```
-3. Fill `domainCertificate.validationRecord.name`/`.value` in
-   [`values.yaml`](values.yaml) from that output, set
-   `validationRecord.enabled: true`, commit, re-sync.
-
-Once `CertificateValidation wildcard` reports `Ready`, pull the ARN into
-the argocd/greeter charts' `alb.ingress.kubernetes.io/certificate-arn` —
-see the TODO comment in either chart's `values.yaml`.
+`provider-aws-acm`/`provider-aws-route53` stay installed (see
+`values.yaml`) — harmless idle, and the natural place to manage a
+specific per-domain cert or other AWS resource through Crossplane again
+later, on purpose, ideally with a real Composition this time rather than
+a manual-value gate.
 
 ## Install
 

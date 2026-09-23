@@ -32,18 +32,23 @@ argo-cd:
     ingress:
       enabled: true
       ingressClassName: alb
+      # Renders spec.tls[].hosts (plus a secretName the ALB controller
+      # never reads — it doesn't do secret-based TLS termination). What
+      # actually matters here is the hosts list: no certificate-arn
+      # annotation below, deliberately, so the ALB controller
+      # auto-discovers a matching ACM cert by comparing this against
+      # certificates in ACM
+      # (https://kubernetes-sigs.github.io/aws-load-balancer-controller/latest/guide/ingress/cert_discovery/)
+      # — terraform/envs/prod/domain.tf provisions a real, dedicated
+      # per-hostname cert for exactly this host, fully automatically (one
+      # `terraform apply`, no manual ARN copy-paste).
+      tls: true
       annotations:
         alb.ingress.kubernetes.io/scheme: internet-facing
         alb.ingress.kubernetes.io/target-type: ip
         alb.ingress.kubernetes.io/backend-protocol: HTTP
         alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS": 443}]'
         alb.ingress.kubernetes.io/ssl-redirect: "443"
-        # TODO: the wildcard cert for *.hivemind.chaima.online is managed
-        # by Crossplane now (charts/env/prod/critical/crossplane), not
-        # Terraform — see the greeter chart's values.yaml for how to read
-        # the ARN once it's ISSUED. Left blank so the ALB controller fails
-        # loudly rather than serving unencrypted.
-        alb.ingress.kubernetes.io/certificate-arn: ""
     resources:
       requests:
         cpu: 100m

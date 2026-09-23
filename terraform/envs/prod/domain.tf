@@ -30,6 +30,15 @@ data "aws_route53_zone" "this" {
 # the actual permissions stay as plain `aws_iam_role_policy` resources
 # below so each one's scope is explicit and reviewable in the diff,
 # rather than hidden behind an `attach_*_policy` flag.
+#
+# `role_requires_mfa = false` on every module call below is required, not
+# cosmetic: the module defaults it to `true` (aimed at humans/IAM-user
+# role assumption) and, left on, adds an `aws:MultiFactorAuthPresent`
+# condition to the *same* trust statement as the `pods.eks.amazonaws.com`
+# principal — which would make the role permanently unassumable by Pod
+# Identity, since a service-to-service STS call never carries an MFA
+# context. Caught in the plan diff before applying, not after breaking
+# auth for external-dns/cert-manager/crossplane.
 module "external_dns_pod_identity" {
   source  = "terraform-aws-modules/iam/aws//modules/iam-assumable-role"
   version = "~> 5.39"
@@ -38,6 +47,7 @@ module "external_dns_pod_identity" {
   role_name   = "${var.cluster_name}-external-dns"
 
   trusted_role_services = ["pods.eks.amazonaws.com"]
+  role_requires_mfa     = false
 
   tags = var.tags
 }
@@ -95,6 +105,7 @@ module "cert_manager_pod_identity" {
   role_name   = "${var.cluster_name}-cert-manager"
 
   trusted_role_services = ["pods.eks.amazonaws.com"]
+  role_requires_mfa     = false
 
   tags = var.tags
 }
@@ -152,6 +163,7 @@ module "crossplane_aws_provider_pod_identity" {
   role_name   = "${var.cluster_name}-crossplane-aws-provider"
 
   trusted_role_services = ["pods.eks.amazonaws.com"]
+  role_requires_mfa     = false
 
   tags = var.tags
 }
@@ -217,10 +229,69 @@ resource "aws_eks_pod_identity_association" "crossplane_aws_provider" {
   tags = var.tags
 }
 
-# The wildcard ACM cert for the ALB-fronted ingresses (argocd, greeter) is
-# no longer managed here — moved to Crossplane
-# (charts/env/prod/critical/crossplane/templates/certificate*.yaml), which
-# now has real ACM+Route53 permissions below instead of the placeholder
-# sts:GetCallerIdentity-only policy. See that chart's README for the
-# Certificate/Record/CertificateValidation resources and why the
-# validation Record needs one manual value filled in after first sync.
+# Per-hostname ACM certs for the ALB-fronted ingresses (argocd, greeter) —
+# one each, not a shared wildcard. Back on Terraform, not Crossplane:
+# Crossplane's Certificate/Record/CertificateValidation setup
+# (charts/env/prod/critical/crossplane/templates/certificate*.yaml, now
+# removed) needed a value copied by hand from the Certificate's assigned
+# validation record into the Record resource after every first sync — no
+# Composition existed to wire that automatically. Confirmed live on a
+# fresh cluster rebuild: nobody had done that manual step, so no cert
+# ever got created and the ingresses had no HTTPS at all.
+#
+# Terraform's dependency graph resolves this in one `apply`, no manual
+# step, ever: `domain_validation_options` becomes known once the
+# certificate is requested, within the same graph the validation record
+# and aws_acm_certificate_validation depend on.
+#
+# No certificate-arn is wired into the ingress charts' values.yaml for
+# these — deliberately. The AWS Load Balancer Controller auto-discovers a
+# matching cert by comparing an Ingress's spec.tls[].hosts (and
+# rules[].host) against ACM
+# (https://kubernetes-sigs.github.io/aws-load-balancer-controller/latest/guide/ingress/cert_discovery/),
+# so creating the right cert here is the entire fix — nothing needs to
+# reference its ARN anywhere.
+locals {
+  ingress_hostnames = {
+    argocd  = "argocd.${var.domain_name}"
+    greeter = "greeter.${var.domain_name}"
+  }
+}
+
+resource "aws_acm_certificate" "ingress" {
+  for_each = local.ingress_hostnames
+
+  domain_name       = each.value
+  validation_method = "DNS"
+
+  tags = var.tags
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+resource "aws_route53_record" "ingress_cert_validation" {
+  for_each = {
+    for k, cert in aws_acm_certificate.ingress : k => one(cert.domain_validation_options)
+    # domain_validation_options is a set (no index access — Terraform
+    # rejects [0] on it, "elements of a set... don't have any separate
+    # index"), but single-hostname (non-SAN) certs always have exactly
+    # one entry, so one(...) — which requires and unwraps exactly one
+    # element — is the correct, safe extraction here, not a workaround.
+  }
+
+  zone_id         = data.aws_route53_zone.this.zone_id
+  name            = each.value.resource_record_name
+  type            = each.value.resource_record_type
+  records         = [each.value.resource_record_value]
+  ttl             = 60
+  allow_overwrite = true
+}
+
+resource "aws_acm_certificate_validation" "ingress" {
+  for_each = aws_acm_certificate.ingress
+
+  certificate_arn         = each.value.arn
+  validation_record_fqdns = [aws_route53_record.ingress_cert_validation[each.key].fqdn]
+}
