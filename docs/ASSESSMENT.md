@@ -242,18 +242,17 @@ counterexample to it.
   goes straight to `main` with no PR, no required review, no
   status-check gate. Fine for a solo build; a real security gap the
   moment more than one person has push access.
-* **No dependency-update automation** — no Dependabot or Renovate config
-  anywhere in the repo. Go module and Helm chart versions are all
-  hand-pinned with no mechanism to know when a pinned version has a
-  disclosed CVE.
 * **The EKS public endpoint's allowed CIDR is a single hardcoded IP**
   captured once, with a code comment already flagging it as something
   that goes stale. Correct instinct (restrict public access at all,
   rather than leaving `0.0.0.0/0`), but a static single-IP allowlist is
   itself an operational trap the moment anyone's network changes — worth
   a VPN/bastion or a maintained IP set instead.
-* **No `LICENSE`, no `SECURITY.md`.** The legal terms of reuse are
-  undefined, and there's no documented vulnerability-disclosure path.
+* **No `LICENSE`, no `SECURITY.md`, no dependency-update automation**
+  (no Dependabot/Renovate config anywhere). Legal terms of reuse are
+  undefined, there's no documented vulnerability-disclosure path, and Go
+  module/Helm chart versions are all hand-pinned with no mechanism to
+  know when a pinned version has a disclosed CVE.
 
 ### Automation / reliability
 
@@ -301,18 +300,6 @@ counterexample to it.
   Application flipping `OutOfSync` due to live drift, which is a cheap,
   specific gap to close (an Argo CD notification/webhook on that
   transition) relative to the general observability gap above.
-
-### Documentation / process
-
-* README, ARCHITECTURE.md, RUNBOOK.md, DISASTER_RECOVERY.md, and
-  DECISIONS.md all exist and are current with the live state of the
-  system — including a shared "bugs found by running the thing" section
-  kept consistent between this document and `ARCHITECTURE.md`. CODEOWNERS
-  exists, with one blanket rule matching the current single-operator
-  reality.
-* **Still no `LICENSE`, no `SECURITY.md`** (also listed under Security
-  above, since both are as much a security-process gap as a docs one).
-* **No dependency-update automation** (also listed under Security above).
 
 ## Incident response & operational judgment
 
