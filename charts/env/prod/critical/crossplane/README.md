@@ -67,11 +67,15 @@ driven by `values.yaml`'s `ingressCertificates.hostnames`), each rendered
 by
 [`templates/composition-ingresscertificate.yaml`](templates/composition-ingresscertificate.yaml)
 into a `Certificate` + Route53 validation `Record` + `CertificateValidation`
-(`acm.aws.upbound.io`/`route53.aws.upbound.io` — the same cluster-scoped
-CRD group `templates/providerconfig.yaml`'s `ProviderConfig` already
-targets, not the newer namespaced `.m.` variant, which needs a
-`ClusterProviderConfig` reference instead of the `ProviderConfig` this
-chart already has set up).
+— the namespaced (`acm.aws.m.upbound.io`/`route53.aws.m.upbound.io`)
+managed-resource CRD variant, required because the `IngressCertificate`
+XRD is `scope: Namespaced`: confirmed live that a namespaced composite
+can't compose a cluster-scoped resource ("cannot apply cluster scoped
+composed resource ... for a namespaced composite resource"). That
+variant's `providerConfigRef` needs `kind: ClusterProviderConfig` — a
+distinct CRD from the plain `ProviderConfig` the old (pre-Composition)
+templates used — so `templates/providerconfig.yaml` creates a
+`ClusterProviderConfig` object now, not a `ProviderConfig`.
 
 This is the second attempt at Crossplane-managed certs. The first
 (`Certificate`/`Record`/`CertificateValidation` applied directly, no

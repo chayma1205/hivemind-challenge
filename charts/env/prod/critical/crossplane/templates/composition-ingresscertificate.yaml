@@ -7,6 +7,15 @@
 # automatically this time via a function pipeline instead of a value
 # copied in by hand.
 #
+# Composed resources use the namespaced (`.m.upbound.io`) managed-resource
+# CRD group, not the plain cluster-scoped one the old templates used —
+# required, confirmed live: a Namespaced-scope composite (this XRD's
+# `scope: Namespaced`) can't compose a cluster-scoped resource ("cannot
+# apply cluster scoped composed resource ... for a namespaced composite
+# resource"). That variant's `providerConfigRef` also defaults to (and,
+# here, explicitly names) `kind: ClusterProviderConfig`, a distinct CRD
+# from the plain `ProviderConfig` — see templates/providerconfig.yaml.
+#
 # The `certificate` resource's ToCompositeFieldPath patches copy ACM's
 # assigned validation record (only known after the Certificate exists —
 # ACM generates it per-request) into the XR's status. The
@@ -56,10 +65,11 @@ spec:
         resources:
           - name: certificate
             base:
-              apiVersion: acm.aws.upbound.io/v1beta1
+              apiVersion: acm.aws.m.upbound.io/v1beta1
               kind: Certificate
               spec:
                 providerConfigRef:
+                  kind: ClusterProviderConfig
                   name: {{ .Values.providerConfig.name }}
                 forProvider:
                   validationMethod: DNS
@@ -88,10 +98,11 @@ spec:
 
           - name: validation-record
             base:
-              apiVersion: route53.aws.upbound.io/v1beta1
+              apiVersion: route53.aws.m.upbound.io/v1beta1
               kind: Record
               spec:
                 providerConfigRef:
+                  kind: ClusterProviderConfig
                   name: {{ .Values.providerConfig.name }}
                 forProvider:
                   ttl: 60
@@ -112,10 +123,11 @@ spec:
 
           - name: certificate-validation
             base:
-              apiVersion: acm.aws.upbound.io/v1beta1
+              apiVersion: acm.aws.m.upbound.io/v1beta1
               kind: CertificateValidation
               spec:
                 providerConfigRef:
+                  kind: ClusterProviderConfig
                   name: {{ .Values.providerConfig.name }}
             patches:
               - type: FromCompositeFieldPath

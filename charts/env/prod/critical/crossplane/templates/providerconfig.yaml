@@ -3,8 +3,17 @@
 # account (templates/deploymentruntimeconfig.yaml), which has an EKS Pod
 # Identity association to an IAM role (terraform/envs/prod/domain.tf's
 # aws_iam_role.crossplane_aws_provider). No Secret needed.
-apiVersion: aws.upbound.io/v1beta1
-kind: ProviderConfig
+#
+# `ClusterProviderConfig` (group aws.m.upbound.io), not the older
+# `ProviderConfig` (group aws.upbound.io) — the composed resources in
+# templates/composition-ingresscertificate.yaml are the namespaced (.m.)
+# managed-resource CRD variant (required: a Namespaced-scope composite
+# can't compose a cluster-scoped resource, confirmed live —
+# "cannot apply cluster scoped composed resource ... for a namespaced
+# composite resource"), and those default their own providerConfigRef to
+# kind: ClusterProviderConfig specifically, not kind: ProviderConfig.
+apiVersion: aws.m.upbound.io/v1beta1
+kind: ClusterProviderConfig
 metadata:
   name: {{ .Values.providerConfig.name }}
   annotations:
