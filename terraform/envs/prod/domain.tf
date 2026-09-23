@@ -17,26 +17,34 @@ data "aws_route53_zone" "this" {
 # which also lists AmazonRoute53FullAccess as the "recommended" policy;
 # scoped down here to just this zone instead, matching the rest of this
 # stack's least-privilege IRSA/pod-identity roles.
-resource "aws_iam_role" "external_dns" {
-  name = "${var.cluster_name}-external-dns"
+#
+# Role/trust-policy creation via terraform-aws-modules/iam/aws (matching
+# docs/DECISIONS.md #1 — community modules, not hand-rolled resources),
+# same v5.x line as iam.tf's IRSA modules. `iam-assumable-role`, not
+# `iam-role-for-service-accounts-eks`: that one is OIDC/IRSA-specific
+# (federated trust to the cluster's OIDC provider); Pod Identity's trust
+# principal is the `pods.eks.amazonaws.com` *service*, which
+# `trusted_role_services` covers directly, and `trusted_role_actions`
+# already defaults to exactly `["sts:AssumeRole", "sts:TagSession"]` —
+# no override needed. The module only creates the role + trust policy;
+# the actual permissions stay as plain `aws_iam_role_policy` resources
+# below so each one's scope is explicit and reviewable in the diff,
+# rather than hidden behind an `attach_*_policy` flag.
+module "external_dns_pod_identity" {
+  source  = "terraform-aws-modules/iam/aws//modules/iam-assumable-role"
+  version = "~> 5.39"
 
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect = "Allow"
-      Principal = {
-        Service = "pods.eks.amazonaws.com"
-      }
-      Action = ["sts:AssumeRole", "sts:TagSession"]
-    }]
-  })
+  create_role = true
+  role_name   = "${var.cluster_name}-external-dns"
+
+  trusted_role_services = ["pods.eks.amazonaws.com"]
 
   tags = var.tags
 }
 
 resource "aws_iam_role_policy" "external_dns" {
   name = "route53-access"
-  role = aws_iam_role.external_dns.id
+  role = module.external_dns_pod_identity.iam_role_name
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -70,7 +78,7 @@ resource "aws_eks_pod_identity_association" "external_dns" {
   # "external-dns", not "kube-system".
   namespace       = "external-dns"
   service_account = "external-dns"
-  role_arn        = aws_iam_role.external_dns.arn
+  role_arn        = module.external_dns_pod_identity.iam_role_arn
 
   tags = var.tags
 }
@@ -79,26 +87,21 @@ resource "aws_eks_pod_identity_association" "external_dns" {
 # main.tf), whose Route53 DNS-01 solver needs write access to this zone.
 # Namespace/service-account name ("cert-manager"/"cert-manager") match the
 # upstream chart's defaults, which the addon mirrors.
-resource "aws_iam_role" "cert_manager" {
-  name = "${var.cluster_name}-cert-manager"
+module "cert_manager_pod_identity" {
+  source  = "terraform-aws-modules/iam/aws//modules/iam-assumable-role"
+  version = "~> 5.39"
 
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect = "Allow"
-      Principal = {
-        Service = "pods.eks.amazonaws.com"
-      }
-      Action = ["sts:AssumeRole", "sts:TagSession"]
-    }]
-  })
+  create_role = true
+  role_name   = "${var.cluster_name}-cert-manager"
+
+  trusted_role_services = ["pods.eks.amazonaws.com"]
 
   tags = var.tags
 }
 
 resource "aws_iam_role_policy" "cert_manager" {
   name = "route53-dns01-solver"
-  role = aws_iam_role.cert_manager.id
+  role = module.cert_manager_pod_identity.iam_role_name
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -129,7 +132,7 @@ resource "aws_eks_pod_identity_association" "cert_manager" {
   cluster_name    = module.eks.cluster_name
   namespace       = "cert-manager"
   service_account = "cert-manager"
-  role_arn        = aws_iam_role.cert_manager.arn
+  role_arn        = module.cert_manager_pod_identity.iam_role_arn
 
   tags = var.tags
 }
@@ -141,26 +144,21 @@ resource "aws_eks_pod_identity_association" "cert_manager" {
 # Scoped to ACM + Route53 — what Crossplane actually manages (the wildcard
 # cert for the ALB ingresses, and its DNS validation record). Narrow
 # further, or widen, as more Crossplane-managed resource types are added.
-resource "aws_iam_role" "crossplane_aws_provider" {
-  name = "${var.cluster_name}-crossplane-aws-provider"
+module "crossplane_aws_provider_pod_identity" {
+  source  = "terraform-aws-modules/iam/aws//modules/iam-assumable-role"
+  version = "~> 5.39"
 
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect = "Allow"
-      Principal = {
-        Service = "pods.eks.amazonaws.com"
-      }
-      Action = ["sts:AssumeRole", "sts:TagSession"]
-    }]
-  })
+  create_role = true
+  role_name   = "${var.cluster_name}-crossplane-aws-provider"
+
+  trusted_role_services = ["pods.eks.amazonaws.com"]
 
   tags = var.tags
 }
 
 resource "aws_iam_role_policy" "crossplane_aws_provider" {
   name = "acm-and-route53"
-  role = aws_iam_role.crossplane_aws_provider.id
+  role = module.crossplane_aws_provider_pod_identity.iam_role_name
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -214,7 +212,7 @@ resource "aws_eks_pod_identity_association" "crossplane_aws_provider" {
   cluster_name    = module.eks.cluster_name
   namespace       = "crossplane-system"
   service_account = "provider-aws"
-  role_arn        = aws_iam_role.crossplane_aws_provider.arn
+  role_arn        = module.crossplane_aws_provider_pod_identity.iam_role_arn
 
   tags = var.tags
 }

@@ -61,12 +61,12 @@ output "aws_load_balancer_controller_iam_role_arn" {
 
 output "cert_manager_iam_role_arn" {
   description = "IAM role ARN for cert-manager's Route53 DNS-01 solver — bound via the EKS Pod Identity association in domain.tf, no manual annotation needed."
-  value       = aws_iam_role.cert_manager.arn
+  value       = module.cert_manager_pod_identity.iam_role_arn
 }
 
 output "external_dns_iam_role_arn" {
   description = "IAM role ARN for the external-dns EKS addon's Route53 access — bound via the EKS Pod Identity association in domain.tf."
-  value       = aws_iam_role.external_dns.arn
+  value       = module.external_dns_pod_identity.iam_role_arn
 }
 
 output "hosted_zone_id" {
@@ -76,7 +76,7 @@ output "hosted_zone_id" {
 
 output "crossplane_aws_provider_iam_role_arn" {
   description = "IAM role ARN for the Crossplane AWS family provider — bound via the EKS Pod Identity association in domain.tf. Minimal placeholder permissions, see charts/env/prod/critical/crossplane/README.md."
-  value       = aws_iam_role.crossplane_aws_provider.arn
+  value       = module.crossplane_aws_provider_pod_identity.iam_role_arn
 }
 
 # No acm_certificate_arn output here — the wildcard cert is now managed by
