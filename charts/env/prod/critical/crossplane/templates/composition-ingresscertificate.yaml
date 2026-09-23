@@ -56,7 +56,7 @@ spec:
         resources:
           - name: certificate
             base:
-              apiVersion: acm.aws.m.upbound.io/v1beta1
+              apiVersion: acm.aws.upbound.io/v1beta1
               kind: Certificate
               spec:
                 providerConfigRef:
@@ -88,7 +88,7 @@ spec:
 
           - name: validation-record
             base:
-              apiVersion: route53.aws.m.upbound.io/v1beta1
+              apiVersion: route53.aws.upbound.io/v1beta1
               kind: Record
               spec:
                 providerConfigRef:
@@ -112,7 +112,7 @@ spec:
 
           - name: certificate-validation
             base:
-              apiVersion: acm.aws.m.upbound.io/v1beta1
+              apiVersion: acm.aws.upbound.io/v1beta1
               kind: CertificateValidation
               spec:
                 providerConfigRef:

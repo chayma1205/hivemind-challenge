@@ -67,7 +67,11 @@ driven by `values.yaml`'s `ingressCertificates.hostnames`), each rendered
 by
 [`templates/composition-ingresscertificate.yaml`](templates/composition-ingresscertificate.yaml)
 into a `Certificate` + Route53 validation `Record` + `CertificateValidation`
-(`acm.aws.m.upbound.io`/`route53.aws.m.upbound.io`).
+(`acm.aws.upbound.io`/`route53.aws.upbound.io` — the same cluster-scoped
+CRD group `templates/providerconfig.yaml`'s `ProviderConfig` already
+targets, not the newer namespaced `.m.` variant, which needs a
+`ClusterProviderConfig` reference instead of the `ProviderConfig` this
+chart already has set up).
 
 This is the second attempt at Crossplane-managed certs. The first
 (`Certificate`/`Record`/`CertificateValidation` applied directly, no
