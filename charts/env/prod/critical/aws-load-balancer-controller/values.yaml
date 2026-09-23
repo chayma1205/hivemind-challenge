@@ -5,8 +5,17 @@ aws-load-balancer-controller:
   # Must match terraform var.cluster_name (terraform/envs/prod).
   clusterName: hivemind-prod
   region: us-east-1
-  # From terraform/envs/prod output `vpc_id`.
-  vpcId: "vpc-00978668ba2e018a8"
+  # No vpcId set, deliberately (was previously hardcoded from a
+  # terraform output — the exact kind of thing that goes stale). Its
+  # controller flag (--aws-vpc-id) defaults to reading the VPC from EC2
+  # instance metadata of the node it's running on when unset
+  # (confirmed against the controller's own docs, not assumed). Hit this
+  # live after a full infra rebuild: the VPC got a new ID, this value
+  # didn't, and the controller silently searched a VPC that no longer
+  # existed ("Evaluated 0 subnets") for 8 hours until someone noticed
+  # neither ingress ever got an ALB. Auto-detection can't go stale the
+  # same way — it re-reads the actual VPC the running pod is in.
+  vpcId: ""
 
   ingressClass: alb
   createIngressClassResource: true
