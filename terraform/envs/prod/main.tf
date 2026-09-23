@@ -162,6 +162,35 @@ module "eks" {
       addon_version               = "v1.4.0-eksbuild.2"
       resolve_conflicts_on_update = "OVERWRITE"
     }
+    # Bundles BOTH the base Secrets Store CSI Driver and the AWS provider
+    # (confirmed via `aws eks describe-addon-configuration` — its config
+    # schema has a nested `secrets-store-csi-driver` key, and upstream's
+    # own README: "Helm chart for the ASCP by default automatically
+    # installs a compatible version of the Secrets Store CSI driver").
+    # No nodeSelector/tolerations override here, unlike the other addons
+    # below: this runs as a DaemonSet (a CSI plugin has to be on every
+    # node that might mount a secret, not just the system node group),
+    # and the schema's own default (`tolerations: [{operator: Exists}]`)
+    # already covers that correctly.
+    #
+    # No IAM/Pod Identity role provisioned for it here, deliberately: the
+    # provider reads Secrets Manager/SSM using each *consuming* pod's own
+    # IRSA or Pod Identity role, passed through via its service account
+    # token — not a shared identity of its own (confirmed against
+    # upstream's README, "Option 2: Using EKS Pod Identity", which has
+    # each workload create its *own* role). A workload that wants to
+    # mount a secret needs its own aws_eks_pod_identity_association
+    # scoped to just that secret's ARN, the same least-privilege pattern
+    # as every other Pod Identity role in this stack — plus a
+    # SecretProviderClass and a matching volume mount, neither of which
+    # exist yet for any workload (greeter doesn't use any secrets today).
+    aws-secrets-store-csi-driver-provider = {
+      addon_version               = "v3.1.3-eksbuild.1"
+      resolve_conflicts_on_update = "OVERWRITE"
+      configuration_values = jsonencode({
+        awsRegion = var.aws_region
+      })
+    }
     # Same system-node-group pinning as cert-manager below. Route53
     # permissions come from the Pod Identity association in domain.tf.
     external-dns = {
