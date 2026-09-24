@@ -327,6 +327,11 @@ module "eks" {
 
   eks_managed_node_groups = {
     default = {
+      # Explicit name (default's own default is the map key above,
+      # "default") — this is what actually names the node group / ASG /
+      # EC2 instances, not the map key itself.
+      name = "${var.cluster_name}-node"
+
       min_size     = var.node_min_size
       max_size     = var.node_max_size
       desired_size = var.node_desired_size
