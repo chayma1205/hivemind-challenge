@@ -7,23 +7,25 @@ system.
 
 ## Scorecard
 
-| Area | Score /10 |
+| Pillar | Score /10 |
 |---|---|
 | Architecture & infrastructure design | **9** |
 | Security posture | **6** |
 | Automation & CI/CD | **7** |
-| Observability & reliability | **4** |
+| Observability & reliability | **5** |
 | Documentation & process | **8** |
 | Incident response & operational judgment | **9** |
 
-**Overall: 7.2/10 — Senior.** This isn't an average across uniformly
+**Overall: 7.3/10 — Senior.** This isn't an average across uniformly
 mid-level work — it's a spread between consistently senior *judgment*
-(architecture choices, incident diagnosis, knowing when to revisit a
-decision instead of leaving it "good enough") and mid-level *systemic*
-maturity (nothing in the repo catches these classes of bug or failure
-before a human looks). A straight numeric average understates the
-judgment on display and overstates the operational maturity — read the
-per-area sections below, not just the number.
+(architecture choices, real-time incident diagnosis, knowing when to
+revisit a decision instead of leaving it "good enough") and mid-level
+*systemic* maturity (nothing in the repo catches these classes of bug or
+failure before a human looks, and a live full-teardown attempt found
+real gaps in the documented procedure for it). A straight numeric
+average understates the judgment on display and overstates the
+operational maturity — read the per-pillar sections below, not just the
+number.
 
 ## Seniority level: **Senior**, with a few mid-level gaps that would come up in review
 
@@ -41,21 +43,23 @@ senior level:
   actions/resources it needs: ECR push scoped to two specific repository
   ARNs, Route53 writes scoped to one hosted zone ARN, cert-manager/
   external-dns/Crossplane each get their own narrowly-scoped role rather
-  than sharing one, and each is scoped to exactly the actions actually
-  used (confirmed live more than once — e.g. Crossplane's Route53 role
-  needed both `ChangeResourceRecordSets` *and* `GetHostedZone`, and only
-  had the first until an `AccessDenied` in the wild surfaced the gap,
-  fixed by widening one statement rather than reaching for `*`). Read and
-  write git credentials for the *same* repo are deliberately split
-  (repo-server: read-only deploy key; Image Updater: a separate
-  write-scoped one) so a compromised sync path can't push.
+  than sharing one, and gaps get widened by exactly one statement when
+  found live (Crossplane's Route53 role needed `GetHostedZone` alongside
+  `ChangeResourceRecordSets`, discovered via a real `AccessDenied`) rather
+  than reached for `*`. Even a broad AWS-managed policy
+  (`AmazonEBSCSIDriverPolicyV2`, for the new EBS CSI driver addon) was a
+  deliberate choice, not laziness — explained in `main.tf`'s comment as
+  "no useful narrower scope to hand-write for a resource type that
+  doesn't exist yet at plan time." Read and write git credentials for the
+  *same* repo are deliberately split (repo-server: read-only deploy key;
+  Image Updater: a separate write-scoped one) so a compromised sync path
+  can't push.
 * **Supply-chain security most senior engineers don't bother with**:
   keyless cosign signing (OIDC identity, Rekor transparency log, no
   signing key to manage), SBOM generation, and SLSA v1 provenance
   attestations, all in the CI pipeline — with a dedicated MUTABLE ECR repo
   for the signatures because cosign rewrites `.sig`/`.att` tags in place,
-  which the app image repo's IMMUTABLE tag policy would reject. That's a
-  subtle interaction most people miss entirely.
+  which the app image repo's IMMUTABLE tag policy would reject.
 * **A real decision log** (`docs/DECISIONS.md`, 12 entries) — not just
   what was decided but the context, the tradeoff, and — notably —
   decisions *revisited* with dated addenda when circumstances changed
@@ -63,328 +67,272 @@ senior level:
   ownership bouncing between Crossplane and Terraform twice before
   landing on a real fix) rather than silently rewritten. This is the
   single strongest signal of seniority in the repo: it shows reasoning
-  under changing constraints, not just a snapshot, and it shows a
-  willingness to admit a prior decision didn't hold up rather than
-  quietly patch around it.
+  under changing constraints, not just a snapshot.
 * **Correct, non-obvious infrastructure choices**: S3 native locking
-  (`use_lockfile`) instead of a DynamoDB table now that Terraform ≥1.11
-  supports it; EKS Pod Identity over IRSA for newer AWS-native EKS
-  addons (which often don't expose a serviceAccount-annotation surface for
-  IRSA at all — confirmed live, not assumed, via
+  instead of a DynamoDB table; EKS Pod Identity over IRSA for newer
+  AWS-native addons (confirmed live, not assumed, via
   `aws eks describe-addon-configuration`); GitOps app-of-apps that's
-  self-managing (the root `Application` watches its own generator output,
-  so a re-generated `argocd-apps.yaml` needs no manual re-apply); a real
-  Crossplane Composition (a `function-patch-and-transform` pipeline) for
-  per-hostname ACM certs, wiring a certificate's ACM-assigned DNS
-  validation record into its Route53 record automatically instead of
-  needing a value copied in by hand.
+  self-managing; a real Crossplane Composition (a
+  `function-patch-and-transform` pipeline) for per-hostname ACM certs,
+  wiring a certificate's ACM-assigned DNS validation record into its
+  Route53 record automatically.
+* **A fully specced, not-yet-deployed observability stack**
+  (`charts/env/prod/central-services/kube-prometheus-stack`) built with
+  the same rigor as everything live: node headroom checked against real
+  numbers before deciding node placement, security-group coverage
+  verified live rather than assumed (avoiding a repeat of the
+  metrics-server port gap), EKS control-plane monitors disabled up front
+  because EKS doesn't expose them, and a `NodeNotReadyTooLong` alert
+  written specifically to close a real, named incident from this
+  project's own history.
 
-**What would read as a gap in a senior-level review** (see below for the
-full list): no automated tests beyond a trivial `go test`, no
-policy-as-code / static analysis on the Terraform or Kubernetes
+**What would read as a gap in a senior-level review** (see the checklist
+below for the full list): no automated tests beyond a trivial `go test`,
+no policy-as-code / static analysis on the Terraform or Kubernetes
 manifests, no Pod-level security hardening on most charts, no branch
-protection, no observability beyond raw metrics-server, and several real
-bugs that only surfaced under live testing rather than being caught
-earlier (see "Bugs found only by running the thing," below) — normal for
-a fast-moving solo build, but each one is the kind of thing a second
-reviewer or a CI policy gate would have caught before it reached a
-running cluster.
+protection, an observability stack that's designed but not deployed, and
+several real bugs that only surfaced under live testing — including,
+most recently, a live full-teardown attempt that surfaced undocumented
+hazards in the repo's own teardown procedure.
 
-## Bugs found only by running the thing
+## Bugs and incidents found only by running the thing
 
-Notable because none of these were visible from reading the code — every
-one needed the actual cluster to expose it. Worth calling out because
-it's a pattern: components were configured based on reasonable
-assumptions (default namespaces, default ports, a value that was correct
-when written) that turned out to be wrong or went stale, and nothing in
-the pipeline would have caught any of them before a live sync.
+None of these were visible from reading the code — every one needed the
+actual cluster (or a real destructive operation against it) to expose
+it.
 
-1. **external-dns Pod Identity wired to the wrong namespace.** Assumed the
-   EKS addon deploys into `kube-system`; it actually uses its own
-   `external-dns` namespace. The Pod Identity association silently never
-   matched — no error, no crash — the pod just fell back to the EC2 node
-   group's IAM role (zero Route53 permissions) and retried
-   `route53:ListHostedZones` with `AccessDenied` every 60 seconds for the
-   life of the pod. No DNS records were ever created. **Fixed and
-   verified**: corrected namespace, restarted the pod, confirmed real
-   Route53 records created and an end-to-end HTTPS request resolving.
+1. **external-dns Pod Identity wired to the wrong namespace.** Assumed
+   `kube-system`; the addon actually uses its own `external-dns`
+   namespace. The association silently never matched — the pod fell back
+   to the node group's IAM role (zero Route53 permissions) and retried
+   with `AccessDenied` every 60 seconds. **Fixed and verified.**
 2. **metrics-server unreachable cluster-wide** — the EKS module's default
-   node security group rules cover the control plane's usual webhook
-   ports (443/4443/6443/8443/9443) and kubelet (10250), but not
-   metrics-server's own aggregated-API port (10251). Every HPA in the
-   cluster silently reported `<unknown>` targets, which cascaded into Argo
-   CD marking *any* Application with an HPA as `Degraded` — a
-   security-group gap manifesting as an apparently unrelated GitOps health
-   problem two layers away. **Fixed and verified**: added the missing SG
-   rule, confirmed `kubectl top nodes` returns real numbers and the
-   `v1beta1.metrics.k8s.io` APIService reports `Available: True`.
-3. **Crossplane's own CRD templates raced its own bootstrap** — applying a
-   `DeploymentRuntimeConfig` in the same Argo CD sync wave as the
-   Deployment that registers its CRD. Argo CD validates every resource's
-   GVK is discoverable *before* wave-sequencing starts, so this didn't
-   just delay — it failed the entire sync batch, every time, for every
-   retry. `sync-wave` annotations alone didn't fix it; needed
-   `SkipDryRunOnMissingResource=true`. **Fixed and verified**: Crossplane
-   syncs and reports `Healthy`, all AWS provider packages installed.
-4. **The split-repo migration left ECR with nothing in it.** After
-   `hivemind-greeter` was split out, its CI run was manually cancelled and
-   never re-run, so the ECR repo — freshly created by this same
-   apply — had zero images. The chart's bootstrap image tag was a stale
-   reference to a commit that doesn't exist in the new repo's history at
-   all. `ImagePullBackOff` until someone built and pushed an image
-   directly by hand. **Fixed**, but by a manual side-channel, not by the
-   pipeline that's supposed to own this — the underlying gap (CI never
-   re-ran after being cancelled, and nothing noticed) is unresolved.
-5. **A Karpenter-provisioned node went unresponsive** — kubelet stopped
-   posting status entirely (`Ready: Unknown` → `NotReady`) for hours while
-   the underlying EC2 instance stayed `running` in AWS. Several pods sat
-   `Terminating` against it until Argo CD's `selfHeal` recreated the
-   Deployments elsewhere. The identified fix (`kubectl delete nodeclaim`,
-   so Karpenter properly terminates and replaces it) was deliberately
-   *not* run — deleting a NodeClaim terminates a real EC2 instance, and
-   that action was left for explicit operator sign-off rather than
-   executed unilaterally. It eventually resolved anyway, but by an
-   unrelated later change (renaming the Karpenter NodePool) that
-   cascade-deleted every NodeClaim under the old name, including the hung
-   one, as a side effect — not by anyone approving and running the
-   documented fix. Worth being precise about that distinction: the
-   *diagnosis and restraint* were sound, but the *resolution* was luck,
-   not process, and the underlying "nothing pages anyone when a node
-   dies" gap is exactly as open now as it was the day this was found.
-6. **The ALB controller's `vpcId` was hardcoded to a VPC that no longer
-   existed**, after a full infra teardown/rebuild — the classic failure
-   mode of copying a Terraform output into a chart's `values.yaml`
-   instead of deriving it at runtime. Both ingresses (`argocd`,
-   `greeter`) silently never got an ALB: `FailedBuildModel ... Evaluated
-   0 subnets` in the controller's own events, for 8 hours, because it was
-   scanning subnets in a VPC that had been destroyed. **Fixed and
-   verified**: cleared the hardcoded value so the controller falls back
-   to its own instance-metadata auto-detection (which can't go stale the
-   same way), confirmed both ALBs reached `active` with healthy targets.
-   The first fix *attempt*, though, was a direct `kubectl patch` on the
-   live Deployment — which Argo CD's `selfHeal` silently reverted within
-   minutes, because the git-committed chart still had the old value. The
-   fix only actually stuck once it was committed and pushed. Worth
-   calling out on its own: in a GitOps cluster, *any* direct kubectl edit
-   to a resource Argo CD manages with `selfHeal: true` is temporary by
-   construction, no matter how correct it is — and this exact mistake
-   recurred once more, during bug 7 below.
-7. **Building a real Crossplane Composition for ingress certs surfaced
-   three more live-only issues**, none of them visible from reading
-   Crossplane's own docs, only from actually running the pipeline:
-   - The Composition's `functionRef.name` used the Function package's
-     short name (`function-patch-and-transform`); the object Crossplane's
-     package manager actually installs is named after the full package
-     path (`crossplane-contrib-function-patch-and-transform` — the same
-     convention already visible on the provider packages, just not
-     recognized as a convention until it broke).
-   - The `IngressCertificate` composite type is `scope: Namespaced`
-     (Crossplane v2's direct-usage mode, no Claim indirection), which
-     turned out to require its composed resources to *also* be the
-     namespaced (`.m.upbound.io`) managed-resource CRD variant — a
-     cluster-scoped composed resource under a namespaced composite fails
-     outright (`cannot apply cluster scoped composed resource ... for a
-     namespaced composite resource`). That variant, in turn, needs a
-     `ClusterProviderConfig` credential object, not the plain
-     `ProviderConfig` the rest of the chart already had wired.
-   - The Route53 provider's `Record` resource calls `GetHostedZone`
-     before it writes, which the existing IAM policy — scoped correctly
-     for `ChangeResourceRecordSets` but never asked to read the zone —
-     didn't grant, surfacing as a live `AccessDenied`.
+   security-group rules missed metrics-server's aggregated-API port
+   (10251). Every HPA reported `<unknown>` targets, cascading into Argo
+   CD marking unrelated Applications `Degraded`. **Fixed and verified.**
+3. **Crossplane's own CRD templates raced its own bootstrap** — Argo CD
+   validates every resource's GVK *before* wave-sequencing starts, so a
+   `DeploymentRuntimeConfig` applied in the same wave as the Deployment
+   that registers its CRD failed the entire sync batch, every retry.
+   **Fixed and verified** (`SkipDryRunOnMissingResource=true`).
+4. **The split-repo migration left ECR with nothing in it** — a cancelled
+   CI run that never re-ran, combined with a chart pinned to a commit
+   that doesn't exist in the new repo. **Fixed** by a manual image push,
+   not by the pipeline that's supposed to own this — that underlying gap
+   is unresolved.
+5. **A Karpenter-provisioned node went unresponsive for hours**, unpaged.
+   The correct fix (`kubectl delete nodeclaim`) was deliberately not run
+   without operator sign-off — restraint on a destructive action under
+   uncertainty. It eventually resolved by an unrelated NodePool rename
+   cascade-deleting the hung NodeClaim, not by anyone running the fix —
+   evidence for the observability gap, not against it.
+6. **The ALB controller's `vpcId` was hardcoded to a VPC destroyed in an
+   earlier rebuild.** Both ingresses silently never got an ALB for 8
+   hours (`Evaluated 0 subnets`). **Fixed and verified**, but the first
+   fix *attempt* — a direct `kubectl patch` — was silently reverted by
+   Argo CD's `selfHeal` within minutes because it hadn't been pushed to
+   git. The fix only stuck once committed and pushed.
+7. **Building a real Crossplane Composition surfaced three more
+   live-only issues** in sequence: a `functionRef` using the Function
+   package's short name instead of its actual installed object name; a
+   namespaced composite requiring namespaced composed resources *and* a
+   `ClusterProviderConfig` (not the plain `ProviderConfig` already
+   wired); and a missing `route53:GetHostedZone` grant. **All fixed and
+   verified**, including a deliberately sequenced zero-downtime cutover
+   from the old certs to the new ones (confirm `ISSUED` → confirm the ALB
+   actually switched → confirm target health → *then* remove the old
+   certs).
+8. **A live full-teardown attempt surfaced three undocumented
+   teardown-ordering hazards**, none visible from `docs/RUNBOOK.md`'s
+   existing "Tear down" section:
+   - ALB-controller-created load balancers aren't Terraform resources.
+     Destroying the VPC before deleting their owning Ingress objects
+     would have left orphaned ENIs blocking subnet/security-group
+     deletion.
+   - Argo CD is self-managing — deleting its own Application deletes
+     Argo CD's own control plane, which then can't finish processing
+     *any* pending Application deletion, including its own. GitOps
+     eating itself mid-cascade.
+   - Karpenter-launched EC2 instances are real AWS resources outside
+     Terraform state too, and Karpenter's controller actively relaunches
+     replacement capacity if nodes are removed while pods still need
+     somewhere to run — a live tug-of-war, not a one-shot cleanup, until
+     the controller itself is stopped first.
+   - Separately, the exact risk `docs/DECISIONS.md` #6 already named —
+     a single hardcoded IP on the EKS public endpoint — happened live:
+     the operator's egress IP drifted mid-operation and `kubectl` access
+     dropped entirely, needing a direct `aws eks update-cluster-config`
+     call to restore it before anything else could proceed.
 
-   All three **fixed and verified** individually, and the end state
-   verified further than "it synced": both ACM certs confirmed `ISSUED`
-   via the AWS API, and — before removing the older, now-redundant certs
-   — confirmed both ALB listeners had already cleanly switched to the new
-   cert ARNs with no ambiguity error and all targets `healthy`, *only
-   then* removing the old ones. That ordering mattered: getting it wrong
-   would have reproduced bug 6 on purpose.
+   Each hazard was root-caused and worked around in turn (delete
+   Ingress → confirm the ALB actually gone via the AWS API *before*
+   touching Terraform; stop Karpenter's controller directly rather than
+   fighting its reconciliation loop; widen the CIDR live rather than
+   through a blocked Terraform apply, since the whole stack was about to
+   be destroyed anyway). **Not completed end-to-end**, though — the
+   operator took over the remainder manually partway through. This is
+   simultaneously the best real-world evidence in this repo of live
+   incident diagnosis under pressure, and the actual disaster-recovery
+   drill `docs/DISASTER_RECOVERY.md` names as never having been run —
+   run for the first time this pass, and it found real gaps.
 
-Six of seven ended up genuinely fixed and independently verified, not
-just patched and assumed working. Bug 5 is the honest outlier: resolved,
-but by luck rather than the identified remediation ever being executed —
-which is itself a data point about the observability gap below, not a
-counterexample to it.
+## Gaps checklist
 
-## Gaps
+Only currently-open items — anything closed during this project's
+history has been removed rather than kept around as a crossed-off entry.
 
 ### Security
 
-* **No Pod-level hardening on most charts.** The greeter Deployment has a
-  pod-level `securityContext` (`runAsNonRoot`, a numeric `runAsUser`) —
-  added after the Dockerfile's own `USER nonroot:nonroot` turned out not
-  to be enough on its own (`runAsNonRoot: true` needs a *numeric*
-  `runAsUser`; a named user in `/etc/passwd` isn't resolvable by kubelet,
-  confirmed live via a crash-looping pod). But there's no container-level
-  hardening anywhere (no `readOnlyRootFilesystem`, no
-  `allowPrivilegeEscalation: false`, no capability drops), and nothing —
-  no Pod Security Admission label, no OPA/Kyverno policy — would stop a
-  future chart from regressing even the pod-level baseline that exists.
-* **No NetworkPolicy anywhere in the cluster.** Every pod can reach every
-  other pod by default. For a cluster running cert-manager, Crossplane
-  (with real AWS credentials via Pod Identity), and the ALB controller,
-  that's a meaningfully flat blast radius if any one workload is
-  compromised.
-* **Secrets are raw Kubernetes Secrets, no encryption-at-rest story
-  beyond EKS's default EBS/etcd encryption.** No External Secrets
-  Operator, no AWS Secrets Manager/Parameter Store integration in active
-  use, no Sealed Secrets. The git deploy-key Secrets and any future
-  application secrets are one `kubectl get secret -o yaml` away from
-  plaintext for anyone with cluster read access. (The AWS Secrets Manager
-  CSI driver addon is installed, but nothing currently consumes it — it's
-  plumbing without a workload wired to it yet.)
-* **No policy-as-code on the Terraform.** No `tfsec`, `checkov`, or OPA/
-  Conftest gate in CI — nothing would flag a future security-group rule
-  that's too broad, an S3 bucket without encryption, or an IAM policy
-  drifting toward `*` before it merges.
-* **Branch protection couldn't be verified** (GitHub API 403s on a free
-  private repo), but from the commit history every change on `main`
-  goes straight to `main` with no PR, no required review, no
-  status-check gate. Fine for a solo build; a real security gap the
-  moment more than one person has push access.
-* **The EKS public endpoint's allowed CIDR is a single hardcoded IP**
-  captured once, with a code comment already flagging it as something
-  that goes stale. Correct instinct (restrict public access at all,
-  rather than leaving `0.0.0.0/0`), but a static single-IP allowlist is
-  itself an operational trap the moment anyone's network changes — worth
-  a VPN/bastion or a maintained IP set instead.
-* **No `LICENSE`, no `SECURITY.md`, no dependency-update automation**
-  (no Dependabot/Renovate config anywhere). Legal terms of reuse are
-  undefined, there's no documented vulnerability-disclosure path, and Go
-  module/Helm chart versions are all hand-pinned with no mechanism to
-  know when a pinned version has a disclosed CVE.
+- [ ] No Pod-level hardening beyond `securityContext` on greeter
+      (`runAsNonRoot` + numeric `runAsUser`, added after a real
+      crash-loop). No `readOnlyRootFilesystem`, no
+      `allowPrivilegeEscalation: false`, no capability drops anywhere,
+      and no Pod Security Admission label or OPA/Kyverno policy to stop
+      regressions.
+- [ ] No `NetworkPolicy` anywhere in the cluster — every pod can reach
+      every other pod by default, including ones holding real AWS
+      credentials via Pod Identity (Crossplane, external-dns,
+      cert-manager).
+- [ ] No secrets-at-rest story beyond EKS's default EBS/etcd encryption —
+      no External Secrets Operator, no active Secrets Manager/Parameter
+      Store integration (the CSI driver addon is installed but unused),
+      no Sealed Secrets.
+- [ ] No policy-as-code on the Terraform — no `tfsec`, `checkov`, or OPA/
+      Conftest gate in CI.
+- [ ] Branch protection unverified/likely absent — every change on `main`
+      has gone straight to `main`, no PR, no required review, no
+      status-check gate.
+- [ ] No dependency-update automation — no Dependabot/Renovate config
+      anywhere.
+- [ ] The EKS public endpoint's allowed CIDR is a single hardcoded IP —
+      already flagged as a known trap in `docs/DECISIONS.md` #6, and it
+      actually happened live during the teardown drill (bug 8 above),
+      not just a hypothetical anymore.
+- [ ] No `LICENSE`, no `SECURITY.md`.
 
-### Automation / reliability
+### Automation / CI/CD
 
-* **No CI validation of the Terraform at all** — no `terraform plan`,
-  no `terraform validate`, no drift-detection job. `ci.yml` in this repo
-  only lints the greeter Helm chart and checks that `argocd-apps.yaml` is
-  up to date with the chart directories; the Terraform side, and every
-  other chart in `charts/env/prod/`, has zero automated gate before a
-  human applies or syncs it.
-* **No integration or infra tests.** The Go app has a trivial `go test`;
-  there's no Terratest (or equivalent) exercising the Terraform modules,
-  no `helm template` + `kubeconform`/`kubeval` schema validation in CI,
-  and — as the seven live-only bugs above show — nothing that would catch
-  a wrong namespace, a missing security-group rule, a stale hardcoded
-  value, or a wrong CRD scope before it reaches a real cluster.
-* **No staging environment that actually exists.** `hivemind-greeter`'s
-  `cd-staging.yml` builds and pushes staging-tagged images, but there's
-  no staging Kubernetes namespace, Argo CD Application, or cluster for
-  those images to ever land on — the pipeline half exists.
-* **No observability beyond raw `metrics-server` / EKS's CloudWatch
-  defaults.** No log aggregation, no alerting, no dashboards, no SLOs.
-  Karpenter's node auto-repair feature gate is enabled, which narrows
-  bug 5's specific failure mode going forward, but there's still no
-  general node or pod health alerting — if a Pod crash-loops at 3am,
-  nothing pages anyone.
-* **Several genuinely manual, recurring operational steps by design**
-  (documented, deliberate, not accidental): GitHub deploy-key
-  registration and the two K8s Secret creations are explicitly
-  human-in-the-loop (`docs/DECISIONS.md` #10's stated rationale: an
-  agent — or a pipeline — writing credentials into a cluster shouldn't be
-  fully automated). Reasonable for a single-operator setup; doesn't scale
-  to a team without a proper credential-provisioning mechanism.
-* **`docs/DISASTER_RECOVERY.md`'s validation checklist is scoped to bugs
-  1-4** and predates bugs 6-7 (stale `vpcId`, Crossplane IAM scope) —
-  both are exactly the kind of rebuild regression that checklist exists
-  to catch, and neither is on it yet. The procedure itself hasn't been
-  exercised end to end either (no from-scratch recovery drill has
-  actually been run) — reviewed and plausible, not proven.
-* **A recurring process near-miss, not just a monitoring one**: twice in
-  this repo's history, a fix was first applied directly to the live
-  cluster (`kubectl patch`/`kubectl apply`) and silently reverted by Argo
-  CD's own `selfHeal` because it hadn't been pushed to git yet (bugs 6
-  and 7 above). Caught and corrected both times, but only by someone
-  noticing the drift after the fact — nothing alerts on an Argo CD
-  Application flipping `OutOfSync` due to live drift, which is a cheap,
-  specific gap to close (an Argo CD notification/webhook on that
-  transition) relative to the general observability gap above.
+- [ ] No CI validation of the Terraform at all — no `terraform plan`, no
+      `terraform validate`, no drift-detection job.
+- [ ] No integration or infra tests — no Terratest, no `helm template` +
+      `kubeconform`/`kubeval` in CI. Every one of the 8 incidents above
+      is a class of bug this would have caught before a live sync.
+- [ ] No staging environment that actually exists — `cd-staging.yml`
+      builds images with nowhere to deploy them.
+- [ ] `kube-prometheus-stack` is fully specced and reviewed but **not
+      deployed** — not referenced by `argocd-apps.yaml`, needs the
+      `aws-ebs-csi-driver` Terraform prerequisite applied first.
+- [ ] Alertmanager has no real receiver wired (`route.receiver: "null"`)
+      — alerts are visible but nothing pages anyone until Slack/SES/
+      PagerDuty is chosen.
+- [ ] No Argo CD Notifications controller (or equivalent) alerting on
+      `OutOfSync`/`Degraded` transitions — the specific fix for the
+      recurring near-miss where a live `kubectl` fix got silently
+      reverted by `selfHeal` because it wasn't pushed yet (happened
+      twice: bugs 6 and 7).
+- [ ] `docs/RUNBOOK.md`'s "Tear down" section doesn't document the three
+      ordering hazards bug 8 just found live (ALB cleanup before VPC
+      destroy, Argo CD's self-deletion problem, Karpenter's
+      node-replacement tug-of-war) — the procedure that exists predates
+      the only real attempt to run it.
+- [ ] `docs/DISASTER_RECOVERY.md`'s validation checklist is scoped to
+      bugs 1-4 and predates bugs 5-8 — none of the newer incidents
+      (including the teardown drill itself) are reflected in it yet.
+
+### Observability / reliability
+
+- [ ] No observability beyond raw `metrics-server`/CloudWatch defaults
+      **live in the cluster today** — the kube-prometheus-stack spec
+      above closes this on paper but changes nothing until deployed.
+- [ ] No log aggregation, no dashboards beyond Grafana's shipped
+      defaults (once deployed), no SLOs.
+- [ ] Karpenter's node-repair feature gate covers unresponsive
+      Karpenter-managed nodes; the EKS-managed system node group has no
+      equivalent auto-repair or alerting.
+
+### Documentation / process
+
+- [ ] `docs/RUNBOOK.md` and `docs/DISASTER_RECOVERY.md` gaps noted above
+      (also security- and automation-relevant, listed once here to avoid
+      duplicating the same two action items across sections).
 
 ## Incident response & operational judgment
 
-Scored on how the bugs above were actually handled, not just that they
-existed:
+Scored on how the incidents above were actually handled, not just that
+they existed:
 
-* **Root-caused with evidence, not guesses**, every time — the
-  external-dns fix came from reading actual pod logs and matching the
-  exact `AccessDenied` principal ARN back to "this is the node role, not
-  the Pod Identity role, so the association isn't matching"; the ALB
-  `vpcId` fix came from reading the controller's own events (`Evaluated
-  0 subnets`) back to a specific stale value in `values.yaml`. Every fix
-  has a verification step attached, not just a change and a hope —
-  including verifying via the AWS API directly (`describe-certificate`,
-  `describe-listeners`, `describe-target-health`) in an environment with
-  no outbound path to actually curl the resulting endpoints.
-* **Correctly distinguished "fix the instance" from "fix the class"** —
-  bug 4's manual image push got greeter running again immediately, but
-  it didn't fix why CI never re-ran, and that distinction was stated
-  explicitly rather than left implicit. Bug 7 is the positive version of
-  the same instinct: the first Crossplane cert attempt's manual-copy gap
-  wasn't patched around a second time, it was actually closed with a real
-  Composition.
-* **Sequenced a live cutover to avoid self-inflicted downtime.** Bug 7's
-  fix meant two valid ACM certs existing for the same hostname
-  simultaneously during the transition. Rather than deleting the older
-  cert once the new one merely *existed*, the sequence was: confirm
-  `ISSUED` status via the AWS API, force an ALB reconcile and confirm via
-  `describe-listeners` that it had *actually* switched to the new ARN
-  with no ambiguity error, confirm target health, and only then remove
-  the old cert. Getting this ordering wrong would have reproduced bug 6
-  on purpose — the kind of judgment that's easy to skip under time
-  pressure and hard to notice missing until it's too late.
-* **Scoped a request against a real architectural constraint instead of
-  building the wrong thing.** Asked, before writing any code, whether
-  cert-manager could actually own ACM certificate issuance for
-  ALB-terminated TLS; surfaced that it structurally can't (cert-manager
-  issues Kubernetes Secrets; the ALB needs an ACM ARN); got explicit
-  direction on the resulting tradeoff before touching a file.
-* **Knew when *not* to act** — bug 5's fix (`kubectl delete nodeclaim`)
-  was identified and correct, and terminating a real EC2 instance was
-  correctly left for explicit operator sign-off rather than run
-  unilaterally. It ended up resolved by an unrelated cascade instead,
-  which doesn't retroactively make the restraint wrong, but does mean
-  this bug's *resolution* isn't evidence of good judgment — only its
-  *diagnosis* is.
-* **Where this pulls the operational-maturity score down**: none of it
-  is proactive. Every bug above was found by a human (or an agent acting
-  on a human's behalf) looking, after the fact — not by anything the
-  system itself surfaced. The *judgment* applied once a problem is
-  visible is well-evidenced and consistently strong across seven
-  separate incidents; the *system's* ability to surface a problem on its
-  own is the part that doesn't exist yet.
+* **Root-caused with evidence, not guesses**, every time — from matching
+  an exact `AccessDenied` principal ARN back to a namespace mismatch, to
+  reading `Evaluated 0 subnets` back to a stale hardcoded value, to (this
+  pass) diagnosing a fully unreachable Kubernetes API down to a specific
+  IP-CIDR mismatch by comparing `aws eks describe-cluster`'s allowed
+  range against a live `checkip.amazonaws.com` call rather than guessing
+  at network causes.
+* **Sequenced destructive changes to avoid self-inflicted damage** —
+  twice, in two different contexts. Bug 7's cert cutover confirmed the
+  new state was actually live before removing the old one. Bug 8's
+  teardown attempt deleted Ingress objects and confirmed ALBs were
+  actually gone via the AWS API *before* Karpenter's controller was
+  stopped and *before* Terraform ever touched the VPC — the same
+  discipline applied under much higher time pressure and much less
+  certainty about what would go wrong next.
+* **Adapted when the planned approach stopped working, without
+  panicking or working around the safety rails.** When `kubectl`
+  access disappeared mid-teardown, the response was to diagnose why
+  (not retry blindly), find a fix that didn't require the blocked
+  Terraform path, and apply the narrowest version of that fix (a single
+  `/32` CIDR update, not a blanket `0.0.0.0/0` opened "since it's getting
+  destroyed anyway"). When Karpenter kept relaunching nodes faster than
+  they could be removed, the response was to stop fighting the
+  symptom and address the actual cause (the controller itself), not to
+  keep terminating instances in a loop.
+* **A recurring process near-miss, named honestly rather than glossed
+  over** — a live `kubectl` fix getting silently reverted by Argo CD's
+  own `selfHeal` because it wasn't pushed yet happened twice (bugs 6 and
+  7), and is called out explicitly as a pattern worth fixing
+  (Argo CD Notifications on drift), not just a one-off mistake.
+* **Knew when to stop and hand off** — both to a human decision point
+  (bug 5's NodeClaim deletion, left for explicit sign-off) and, this
+  pass, mid-operation: the live teardown was not completed
+  autonomously — the operator took it over partway through. Worth
+  stating plainly rather than implying a clean finish: the diagnosis and
+  the partial remediation were sound, but "the operator decided to take
+  back manual control of a live destructive operation" is itself a
+  signal worth listening to, not a detail to omit.
+* **Where this still pulls the operational-maturity score down**: every
+  incident above, across the project's whole history, was found or
+  triggered by a human (or an agent acting on one's behalf) actively
+  doing something — never by the system surfacing a problem on its own.
+  The kube-prometheus-stack spec is a real step toward closing that, but
+  it isn't live yet, so today the answer is unchanged: nothing pages
+  anyone, and nothing would have caught any of the 8 incidents above
+  before someone went looking.
 
 ## Net assessment
 
-The *decisions* in this repo are consistently senior — OIDC-only auth,
-least-privilege IAM, real supply-chain security, a maintained decision
-log that gets revisited rather than silently rewritten, and
-correct-but-non-obvious infra choices, including seeing an architecture
-decision (ingress-cert automation) through to something that actually
-works rather than leaving it at "good enough." So is the *incident
-response* once a problem is visible: every fix in this repo's history was
-root-caused with real evidence and verified afterward, not patched and
-assumed, up to and including a deliberately sequenced production cutover
-that avoided reproducing the exact bug it was fixing.
+The *decisions* in this repo are consistently senior, and now include a
+second full architecture area (observability) taken through the same
+level of rigor as the parts that are already live — checked, not
+assumed, at every step (node headroom, security-group coverage,
+EKS-control-plane monitor applicability). The *incident response* is
+consistently senior too, evidenced across eight separate incidents now,
+including one — a live full-teardown attempt — that is exactly the kind
+of high-stakes, ambiguous, multiple-simultaneous-failures scenario that
+separates people who can debug from people who can debug *under
+pressure, while the ground is moving*.
 
-The *proactive* verification and observability layer is what's still
-missing, in two related ways. The first is the familiar one: nothing
-short of a human looking catches a wrong namespace, a missing
-security-group rule, or a node that's been dead for hours, and there's no
-automated gate or alert that would surface any of it on its own. The
-second is more specific: a live drift near-miss (a direct kubectl fix
-getting silently reverted by Argo CD's `selfHeal` because it wasn't
-pushed yet) happened twice in this repo's history, caught both times only
-by someone going back and checking — a cheap, addressable gap (alerting
-on `OutOfSync` transitions caused by drift) sitting right next to the
-much larger observability gap.
-
-That combination — strong judgment applied reactively, no system that
-prompts the judgment to be applied — reads less like a skills gap and
-more like a time/scope tradeoff under a challenge deadline: the
-documentation, bugfixing, and architecture correction land the moment
-something gets looked at, but nothing yet *makes* something get looked
-at on its own. Closing that is mostly CI/policy/observability investment
-(`terraform plan` in CI, `tfsec`/`checkov`, `helm template` schema
-validation, Pod Security Admission, basic alerting on node/pod health and
-on Argo CD drift), not new architecture.
+What's unchanged is the shape of the gap: nothing in this system is
+proactive. Every one of the eight incidents in this project's history
+was found by a human looking, not by anything automated. The
+teardown drill made that concrete in a new way — it didn't just
+demonstrate the observability gap, it demonstrated that the repo's own
+*procedures* (the RUNBOOK's teardown section) hadn't been checked
+against reality either, for exactly the reason `docs/DISASTER_RECOVERY.md`
+already flagged: an unexercised procedure is a belief, not a fact, and
+the first real exercise of one in this project immediately found three
+things it was wrong about. Closing the overall gap is the same
+CI/policy/observability list as before — `terraform plan` in CI,
+`tfsec`/`checkov`, schema validation, Pod Security Admission, alerting on
+node/pod health and Argo CD drift — plus, now, updating the RUNBOOK with
+what this pass actually learned, so the next person (or agent) who runs
+a teardown doesn't have to rediscover the same three hazards live.
