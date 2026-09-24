@@ -262,14 +262,34 @@ kubectl top nodes
 # external-dns has no auth errors (the other bug from that same section —
 # specifically check it's NOT falling back to the node IAM role)
 kubectl logs -n external-dns -l app.kubernetes.io/name=external-dns --tail=20
+
+# Both ALBs actually have an address — a stale hardcoded vpcId in the ALB
+# controller's chart (bug 6) left both ingresses with no ADDRESS at all
+# for 8 hours after a VPC rebuild, no error, just silence
+kubectl get ingress -A
+
+# Crossplane's ingress-cert Composition actually issued real certs, not
+# just synced the XR objects (bug 7 — this Composition has real
+# ordering/IAM dependencies a first sync can race)
+kubectl get ingresscertificates.hivemind.io -A
+aws acm list-certificates --profile hivemind \
+  --query "CertificateSummaryList[?contains(DomainName, 'hivemind.chaima.online')].[DomainName,Status]"
 ```
 
-If any of these fail, check `docs/ASSESSMENT.md`'s "Bugs found only by
-running the thing" section first — several of the failure modes there
-(wrong Pod Identity namespace, missing security group rule for
-metrics-server) are exactly the kind of thing that reappears after a
-from-scratch rebuild if the underlying Terraform fix isn't actually in
-the state being applied.
+If any of these fail, check `docs/ASSESSMENT.md`'s "Bugs and incidents
+found only by running the thing" section first — several of the failure
+modes there (wrong Pod Identity namespace, missing security group rule
+for metrics-server, a stale hardcoded `vpcId`, Crossplane IAM/CRD-scope
+issues) are exactly the kind of thing that reappears after a
+from-scratch rebuild if the underlying Terraform/chart fix isn't
+actually in the state being applied.
+
+Before doing any of the above, also see `docs/RUNBOOK.md`'s "Tear down"
+section if this recovery follows a teardown rather than an actual
+loss — a live teardown attempt found real ordering hazards (ALB cleanup
+before VPC destroy, Argo CD's self-managing control plane, Karpenter
+relaunching nodes) that aren't specific to recovery but will bite the
+*next* rebuild if the prior teardown wasn't done cleanly.
 
 ## Known gaps (be honest about what this doesn't cover)
 
@@ -278,8 +298,12 @@ the state being applied.
   entirely, with no failover.
 - **No automated backup testing.** The state-bucket-versioning recovery
   path and the import-vs-rebuild tradeoff above are documented but not
-  regularly exercised — the first real test of this doc may be an actual
-  incident.
+  regularly exercised. The *teardown* side got one real (partial) test —
+  see `docs/ASSESSMENT.md` incident #8, which found three ordering
+  hazards now folded into `docs/RUNBOOK.md`'s "Tear down" section — but
+  the *rebuild-from-scratch* scenario above still hasn't been run for
+  real; the first genuine test of that half specifically may still be an
+  actual incident.
 - **No RPO/RTO commitment beyond best-effort.** This is a single-operator
   project, not a system with an on-call rotation or an SLA. The
   procedures above are written to be followable under pressure, not to

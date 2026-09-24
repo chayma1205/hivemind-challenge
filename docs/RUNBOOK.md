@@ -229,8 +229,94 @@ kubectl rollout status deployment/greeter -n greeter
 
 ## 10. Tear down
 
-Reverse order of creation — EKS/VPC/ECR first, backend bucket last (and
-only if nothing else uses it):
+`terraform destroy` alone is **not safe to run directly** against this
+stack. Three things it manages the *network* for (the VPC, its subnets,
+its security groups) have real AWS resources living inside them that
+Terraform doesn't know exist, created imperatively by controllers running
+inside the cluster. Destroy the VPC first and those resources are
+orphaned: load balancers block subnet deletion with a stuck ENI, and
+EC2 instances Karpenter launched just sit there, still billing, no
+longer reachable by anything that could clean them up. This is not
+theoretical — steps 1-3 below are exactly what a real teardown attempt
+found live, the first time this procedure was actually exercised (see
+`docs/ASSESSMENT.md`'s incident #8 and `docs/DISASTER_RECOVERY.md`'s
+"Scenario: full cluster loss" for the fuller account).
+
+**Do these first, in order, before touching Terraform:**
+
+1. **Delete every ALB-backed Ingress and confirm the load balancers are
+   actually gone**, before anything else. Deleting the Ingress alone
+   isn't enough if Argo CD is still managing it — deal with Argo CD
+   first (step 2), or these get silently recreated by `selfHeal` and
+   step 1 never actually finishes:
+
+   ```bash
+   kubectl delete ingress --all -A
+   # Poll until this returns nothing before proceeding — do not just
+   # assume the delete took effect:
+   aws elbv2 describe-load-balancers \
+     --query "LoadBalancers[?contains(LoadBalancerName, 'k8s-')].LoadBalancerName"
+   ```
+
+2. **Argo CD is self-managing — its own `argocd` Application manages its
+   own Helm release.** Deleting that Application deletes Argo CD's own
+   control plane (application-controller, repo-server, ...), which then
+   can't finish processing *any* pending Application deletion, including
+   the one that triggered it — confirmed live: `kubectl get pods -n
+   argocd` afterward showed only `argocd-image-updater-controller` still
+   running, and every other Application was stuck `Terminating` forever
+   with no controller left to process its finalizer. If Argo CD's `root`
+   app-of-apps has `syncPolicy.automated` set, disable it first
+   (`kubectl patch application root -n argocd --type=json -p='[{"op":
+   "remove","path":"/spec/syncPolicy/automated"}]'`) so it stops
+   recreating whatever you delete next. Expect to finish step 1's Ingress
+   cleanup by hand (direct `kubectl delete ingress`, not through Argo CD)
+   once its control plane is gone.
+
+3. **Stop Karpenter before removing its nodes, not after.** Karpenter's
+   whole job is ensuring enough capacity exists for pending pods — delete
+   a NodeClaim while Karpenter is still running and it evicts the pods,
+   notices they need somewhere to go, and launches *replacement* nodes,
+   which are just as much outside Terraform state as the one just
+   removed. Confirmed live: deleting one NodeClaim while Karpenter was
+   still up left *two* new EC2 instances running a few minutes later.
+   Stop the controller first, then clean up directly:
+
+   ```bash
+   kubectl scale deployment karpenter -n kube-system --replicas=0
+   # Confirm it's actually down before terminating anything:
+   kubectl get pods -n kube-system -l app.kubernetes.io/name=karpenter
+   aws ec2 describe-instances \
+     --filters "Name=tag:karpenter.sh/nodepool,Values=*" \
+               "Name=instance-state-name,Values=running,pending" \
+     --query 'Reservations[].Instances[].InstanceId' --output text \
+     | xargs -r aws ec2 terminate-instances --instance-ids
+   ```
+
+4. **If `kubectl` stops working partway through any of this**, check the
+   EKS public endpoint's allowed CIDR before assuming something you did
+   broke it — `docs/DECISIONS.md` #6 already names this as a standing
+   risk (a single hardcoded operator IP), and it happened live during
+   the same teardown that found the three hazards above:
+
+   ```bash
+   aws eks describe-cluster --name hivemind-prod \
+     --query 'cluster.resourcesVpcConfig.publicAccessCidrs'
+   curl -s https://checkip.amazonaws.com   # compare against the above
+   ```
+
+   If they don't match, widen it directly rather than fighting a blocked
+   `terraform apply` for something about to be destroyed anyway:
+
+   ```bash
+   aws eks update-cluster-config --name hivemind-prod \
+     --resources-vpc-config publicAccessCidrs="<your current IP>/32"
+   ```
+
+**Only once 1-3 are confirmed clean** (no `k8s-*` load balancers, no
+Karpenter-tagged running instances) is it safe to destroy the
+Terraform-managed infrastructure — reverse order of creation, EKS/VPC/ECR
+first, backend bucket last (and only if nothing else uses it):
 
 ```bash
 cd terraform/envs/prod
@@ -246,7 +332,12 @@ avoid silently losing image/state history. Empty them explicitly
 (`aws s3 rm s3://<bucket> --recursive`, delete ECR images) if you
 actually intend to remove everything. The Route53 hosted zone is
 untouched either way — it's out-of-band, not part of this Terraform
-state.
+state. Crossplane-managed resources (the ingress ACM certs — see
+`charts/env/prod/critical/crossplane`) are also out-of-band; deleting
+their `IngressCertificate` objects first
+(`kubectl delete ingresscertificates.hivemind.io --all -A`) is cheap
+cleanup but not blocking, since ACM certs and Route53 records aren't
+VPC-scoped and won't get in Terraform's way either way.
 
 ## Troubleshooting
 

@@ -13,17 +13,21 @@ system.
 | Security posture | **6** |
 | Automation & CI/CD | **7** |
 | Observability & reliability | **5** |
-| Documentation & process | **8** |
+| Documentation & process | **9** |
 | Incident response & operational judgment | **9** |
 
-**Overall: 7.3/10 — Senior.** This isn't an average across uniformly
+**Overall: 7.5/10 — Senior.** This isn't an average across uniformly
 mid-level work — it's a spread between consistently senior *judgment*
 (architecture choices, real-time incident diagnosis, knowing when to
 revisit a decision instead of leaving it "good enough") and mid-level
 *systemic* maturity (nothing in the repo catches these classes of bug or
-failure before a human looks, and a live full-teardown attempt found
-real gaps in the documented procedure for it). A straight numeric
-average understates the judgment on display and overstates the
+failure before a human looks). Documentation scores highest it has all
+project: `docs/RUNBOOK.md`'s teardown procedure and
+`docs/DISASTER_RECOVERY.md`'s validation checklist aren't just
+written — they've been checked against what a live attempt actually
+found, and updated with the exact commands and failure modes that
+attempt surfaced, not generic best practice. A straight numeric average
+still understates the judgment on display and overstates the
 operational maturity — read the per-pillar sections below, not just the
 number.
 
@@ -230,15 +234,6 @@ history has been removed rather than kept around as a crossed-off entry.
       recurring near-miss where a live `kubectl` fix got silently
       reverted by `selfHeal` because it wasn't pushed yet (happened
       twice: bugs 6 and 7).
-- [ ] `docs/RUNBOOK.md`'s "Tear down" section doesn't document the three
-      ordering hazards bug 8 just found live (ALB cleanup before VPC
-      destroy, Argo CD's self-deletion problem, Karpenter's
-      node-replacement tug-of-war) — the procedure that exists predates
-      the only real attempt to run it.
-- [ ] `docs/DISASTER_RECOVERY.md`'s validation checklist is scoped to
-      bugs 1-4 and predates bugs 5-8 — none of the newer incidents
-      (including the teardown drill itself) are reflected in it yet.
-
 ### Observability / reliability
 
 - [ ] No observability beyond raw `metrics-server`/CloudWatch defaults
@@ -249,12 +244,6 @@ history has been removed rather than kept around as a crossed-off entry.
 - [ ] Karpenter's node-repair feature gate covers unresponsive
       Karpenter-managed nodes; the EKS-managed system node group has no
       equivalent auto-repair or alerting.
-
-### Documentation / process
-
-- [ ] `docs/RUNBOOK.md` and `docs/DISASTER_RECOVERY.md` gaps noted above
-      (also security- and automation-relevant, listed once here to avoid
-      duplicating the same two action items across sections).
 
 ## Incident response & operational judgment
 
