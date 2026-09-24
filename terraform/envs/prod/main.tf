@@ -393,8 +393,11 @@ module "ebs_csi_pod_identity" {
 }
 
 resource "aws_iam_role_policy_attachment" "ebs_csi_driver" {
-  role       = module.ebs_csi_pod_identity.iam_role_name
-  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicyV2"
+  role = module.ebs_csi_pod_identity.iam_role_name
+  # Confirmed live (`aws iam list-policies`) after the wrong ARN failed
+  # a real apply — no "service-role/" path prefix, despite that being the
+  # path the EKS addon config's recommendedManagedPolicies field implied.
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEBSCSIDriverPolicyV2"
 }
 
 resource "aws_eks_pod_identity_association" "ebs_csi_driver" {

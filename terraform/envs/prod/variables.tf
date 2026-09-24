@@ -95,9 +95,9 @@ variable "node_desired_size" {
 }
 
 variable "cluster_endpoint_public_access_cidrs" {
-  description = "CIDR blocks allowed to reach the EKS public API endpoint. Defaults to the operator's own IP at the time this was set; update if your IP changes."
+  description = "CIDR blocks allowed to reach the EKS public API endpoint. Defaults to the operator's own IP at the time this was set; update if your IP changes. This exact default going stale mid-session (twice) is the live example docs/DECISIONS.md #6 already names as a standing risk of a static single-IP allowlist — check `curl https://checkip.amazonaws.com` against this value before assuming a `kubectl` timeout is anything else."
   type        = list(string)
-  default     = ["93.244.115.182/32"]
+  default     = ["93.244.165.18/32"]
 }
 
 variable "domain_name" {
