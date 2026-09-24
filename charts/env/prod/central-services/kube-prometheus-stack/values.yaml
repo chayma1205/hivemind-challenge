@@ -143,12 +143,18 @@ kube-prometheus-stack:
 
   grafana:
     replicas: 1
+    # 256Mi was wrong — confirmed live: the grafana container OOMKilled
+    # (exit 137) repeatedly under normal startup, settling at ~214Mi once
+    # stable, essentially the whole limit with zero headroom for a
+    # request spike or a heavier dashboard load. Request bumped to match
+    # real steady-state usage instead of a guess; limit doubled for
+    # actual headroom.
     resources:
       requests:
         cpu: 100m
-        memory: 128Mi
-      limits:
         memory: 256Mi
+      limits:
+        memory: 512Mi
     persistence:
       enabled: true
       storageClassName: gp3
@@ -204,6 +210,21 @@ kube-prometheus-stack:
         # not hand-building dashboards for things Grafana Labs already
         # maintains well.
         defaultDashboardsEnabled: true
+      # The two k8s-sidecar containers (dashboard/datasource watchers) had
+      # no resource limits at all — found by reading actual
+      # `kubectl top pod --containers` usage (~70-75Mi each, steady)
+      # rather than guessing. Small, real numbers with headroom, not left
+      # unbounded. (Shared across both sidecar containers — this is the
+      # one `sidecar:` key the grafana subchart actually reads; a second,
+      # separate `sidecar:` block elsewhere in this file would silently
+      # clobber this one, not merge with it — YAML duplicate-key
+      # semantics, confirmed live the hard way.)
+      resources:
+        requests:
+          cpu: 10m
+          memory: 64Mi
+        limits:
+          memory: 150Mi
 
   prometheus-node-exporter:
     # A DaemonSet, same as the aws-secrets-store-csi-driver-provider addon
