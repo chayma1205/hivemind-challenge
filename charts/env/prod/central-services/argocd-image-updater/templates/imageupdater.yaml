@@ -25,7 +25,13 @@ spec:
       # SSH, not HTTPS: this repo is private (see docs/DECISIONS.md #10).
       repository: {{ .Values.imageUpdater.gitRepository }}
       branch: main
-      writeBackTarget: "helmvalues:charts/env/prod/apps/greeter/values.yaml"
+      # No leading `/` means this resolves *relative to the Application's
+      # spec.source.path* (charts/env/prod/apps/greeter), not the repo
+      # root — confirmed live: the full repo path here made the updater
+      # write to charts/env/prod/apps/greeter/charts/env/prod/apps/greeter/values.yaml,
+      # a new file one level too deep, leaving the real values.yaml
+      # untouched. See argocd-image-updater's update-methods.md.
+      writeBackTarget: "helmvalues:./values.yaml"
   applicationRefs:
     - namePattern: "greeter"
       images:
