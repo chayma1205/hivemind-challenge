@@ -226,11 +226,6 @@ history has been removed rather than kept around as a crossed-off entry.
 - [ ] `kube-prometheus-stack` is fully specced and reviewed but **not
       deployed** — not referenced by `argocd-apps.yaml`, needs the
       `aws-ebs-csi-driver` Terraform prerequisite applied first.
-- [ ] No Argo CD Notifications controller (or equivalent) alerting on
-      `OutOfSync`/`Degraded` transitions — the specific fix for the
-      recurring near-miss where a live `kubectl` fix got silently
-      reverted by `selfHeal` because it wasn't pushed yet (happened
-      twice: bugs 6 and 7).
 ### Observability / reliability
 
 - [ ] No observability beyond raw `metrics-server`/CloudWatch defaults
