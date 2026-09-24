@@ -1,5 +1,4 @@
 replicaCount: 2
-
 image:
   # terraform/envs/prod output `ecr_repository_url` (module.ecr_greeter).
   # Fixed — only `tag` below moves.
@@ -10,9 +9,9 @@ image:
   # tag lands in ECR (published as a GitHub Release in the hivemind-greeter
   # repo — see docs/DECISIONS.md #11). Don't hand-edit once that's live;
   # it'll just be overwritten on the next sync.
-  tag: "ea792b8"
+  tag: "v1.0.0"
   pullPolicy: IfNotPresent
-
+  name: 324464328617.dkr.ecr.us-east-1.amazonaws.com/hivemind-greeter
 # Pod-level hardening. runAsUser is REQUIRED alongside runAsNonRoot, not
 # optional: the Dockerfile's `USER nonroot:nonroot` is a *named* user, and
 # the kubelet's runAsNonRoot check needs a numeric UID to verify against
@@ -28,18 +27,15 @@ podSecurityContext:
   runAsNonRoot: true
   runAsUser: 65532
   runAsGroup: 65532
-
 # Every rendered value here becomes a container env var. HELLO_TAG is
 # echoed back in every response (see app/greeter.go) — set it to something
 # unique per deployment/environment.
 env:
   HELLO_TAG: ""
-
 service:
   type: ClusterIP
   port: 80
   targetPort: 8080
-
 ingress:
   enabled: true
   ingressClassName: alb
@@ -60,20 +56,17 @@ ingress:
     # templates/composition-ingresscertificate.yaml). Set this annotation
     # explicitly only if that discovery ever needs overriding.
   host: greeter.hivemind.chaima.online
-
 resources:
   requests:
     cpu: 50m
     memory: 32Mi
   limits:
     memory: 64Mi
-
 autoscaling:
   enabled: true
   minReplicas: 2
   maxReplicas: 6
   targetCPUUtilizationPercentage: 70
-
 # Right-sizing recommendations (not enforcement) for this Deployment's
 # resource requests/limits. Requires
 # charts/env/prod/critical/vertical-pod-autoscaler to be installed —
@@ -90,18 +83,15 @@ verticalPodAutoscaler:
   # — switching this to "Auto" is a deliberate later decision, not a
   # default to flip casually.
   updateMode: "Off"
-
 podDisruptionBudget:
   enabled: true
   minAvailable: 1
-
 # Spread pods across AZs instead of piling onto one; ScheduleAnyway so a
 # temporary imbalance doesn't block scheduling outright.
 topologySpreadConstraints:
   enabled: true
   maxSkew: 1
   whenUnsatisfiable: ScheduleAnyway
-
 # Keep replicas off the same node (distinct from topologySpreadConstraints
 # above, which is AZ-level and doesn't prevent two replicas sharing a
 # node). "soft" (preferred, default) avoids co-location without blocking
@@ -112,7 +102,6 @@ topologySpreadConstraints:
 podAntiAffinity:
   enabled: true
   type: soft
-
 # This is app workload, not a cluster-critical add-on, so it deliberately
 # does NOT set nodeSelector/tolerations for the `role=system` /
 # CriticalAddonsOnly-tainted node group (contrast with
