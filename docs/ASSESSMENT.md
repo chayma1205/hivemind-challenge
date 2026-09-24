@@ -226,9 +226,6 @@ history has been removed rather than kept around as a crossed-off entry.
 - [ ] `kube-prometheus-stack` is fully specced and reviewed but **not
       deployed** — not referenced by `argocd-apps.yaml`, needs the
       `aws-ebs-csi-driver` Terraform prerequisite applied first.
-- [ ] Alertmanager has no real receiver wired (`route.receiver: "null"`)
-      — alerts are visible but nothing pages anyone until Slack/SES/
-      PagerDuty is chosen.
 - [ ] No Argo CD Notifications controller (or equivalent) alerting on
       `OutOfSync`/`Degraded` transitions — the specific fix for the
       recurring near-miss where a live `kubectl` fix got silently
