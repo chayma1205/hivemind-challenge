@@ -125,7 +125,12 @@ rebuild from scratch. Terraform state and git are both intact.
 **Estimated RTO:** 30-45 minutes for a clean rebuild with the hosted zone
 intact and no unexpected `terraform apply` surprises. Add however long
 DNS propagation takes if the zone itself also needed recreating (hours,
-not minutes — see below).
+not minutes — see below). **Observed, not just estimated**: a real
+full rebuild took closer to 90 minutes, because it wasn't surprise-free
+— see "Known gaps" below for the two live bugs that ate the difference.
+Left the estimate as-is rather than just replacing it with the observed
+number: those bugs are now fixed, so the *next* rebuild should actually
+land closer to the original estimate again.
 
 ## Scenario: Terraform state bucket lost
 
@@ -296,14 +301,20 @@ relaunching nodes) that aren't specific to recovery but will bite the
 - **Single region, single AZ-spread within that region.** No
   cross-region DR. A `us-east-1` regional outage takes this down
   entirely, with no failover.
-- **No automated backup testing.** The state-bucket-versioning recovery
+- **No automated backup testing** — the state-bucket-versioning recovery
   path and the import-vs-rebuild tradeoff above are documented but not
-  regularly exercised. The *teardown* side got one real (partial) test —
-  see `docs/ASSESSMENT.md` incident #8, which found three ordering
-  hazards now folded into `docs/RUNBOOK.md`'s "Tear down" section — but
-  the *rebuild-from-scratch* scenario above still hasn't been run for
-  real; the first genuine test of that half specifically may still be an
-  actual incident.
+  regularly exercised, only once each so far (the teardown in incident
+  #8, and a full rebuild-from-scratch immediately after it — both real,
+  neither automated or repeated since). The rebuild found two more live
+  bugs on top of #8's three: a wrong AWS-managed IAM policy ARN
+  (`AmazonEBSCSIDriverPolicyV2` has no `service-role/` path prefix,
+  confirmed via `aws iam list-policies` after the wrong one failed a real
+  `AttachRolePolicy` call) and — again — a stale hardcoded CIDR
+  (`docs/DECISIONS.md` #6's named risk recurring a second time in the
+  same session, on a *freshly created* cluster this time, not just a
+  live one that drifted). Both fixed in Terraform, not worked around
+  live. Took noticeably longer than the 30-45 minute estimate below as a
+  result — closer to 90, once every fix-and-reapply cycle is counted.
 - **No RPO/RTO commitment beyond best-effort.** This is a single-operator
   project, not a system with an on-call rotation or an SLA. The
   procedures above are written to be followable under pressure, not to

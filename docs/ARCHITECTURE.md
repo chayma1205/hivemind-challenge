@@ -152,12 +152,15 @@ Helm charts, split by role:
 
 * [`critical/`](../charts/env/prod/critical) — cluster-critical add-ons
   not covered by an EKS addon: Karpenter, the AWS Load Balancer
-  Controller, and Crossplane. Each a thin wrapper around an upstream
-  chart, scheduled onto the `role=system` node group via matching
-  `nodeSelector`/tolerations.
-* [`central-services/`](../charts/env/prod/central-services) — Argo CD
-  and Argo CD Image Updater, installed once for the cluster. Same node
-  placement as `critical/`.
+  Controller, Crossplane, and the Vertical Pod Autoscaler. Each a thin
+  wrapper around an upstream chart, scheduled onto the `role=system` node
+  group via matching `nodeSelector`/tolerations.
+* [`central-services/`](../charts/env/prod/central-services) — Argo CD,
+  Argo CD Image Updater, and kube-prometheus-stack, installed once for
+  the cluster. Argo CD/Image Updater share `critical/`'s node placement;
+  kube-prometheus-stack deliberately doesn't (see that chart's README) —
+  it's not bootstrap-order-sensitive the way the others are, and the
+  system node group has no CPU headroom to spare for it.
 * [`apps/`](../charts/env/prod/apps) — actual application workloads (just
   [`greeter`](../charts/env/prod/apps/greeter) today), templated from
   scratch rather than wrapping an upstream chart. Deliberately does *not*
@@ -173,10 +176,12 @@ bootstrap `kubectl apply`.
 
 Split across two repos (see DECISIONS.md #11 for why):
 
-* **This repo**: [`ci.yml`](../.github/workflows/ci.yml) lints the
-  greeter Helm chart and checks `argocd-apps.yaml` is up to date with the
-  chart directories on every PR/push touching `charts/**`. No app build,
-  no AWS credentials — this repo is GitOps-only.
+* **This repo**: [`ci.yml`](../.github/workflows/ci.yml) lints every
+  Helm chart under `charts/env/prod/` and checks `argocd-apps.yaml` is up
+  to date with the chart directories on every PR/push touching
+  `charts/**`. No app build, no AWS credentials — this repo is
+  GitOps-only. Still no `terraform plan`/`validate` gate, though — see
+  ASSESSMENT.md.
 * **`hivemind-greeter`**: owns the Go build/test, Docker build, Trivy
   scan, cosign signing (keyless, OIDC identity, Rekor transparency log),
   SBOM generation, and SLSA v1 provenance attestation. Pushes to ECR via
@@ -244,11 +249,12 @@ project's verification layer versus its decision-making.
   brief) hasn't been made — still env-var only, in `hivemind-greeter`.
 * No staging environment — `hivemind-greeter`'s `cd-staging.yml` builds
   and pushes staging-tagged images with nowhere to deploy them.
-* Observability beyond metrics-server / EKS-CloudWatch defaults — no log
-  aggregation, alerting, or dashboards.
-* No NetworkPolicy, no Pod-level `securityContext` hardening, no
-  policy-as-code on the Terraform, no infra/integration tests — see
-  [ASSESSMENT.md](ASSESSMENT.md) for the full gap list.
+* No log aggregation, no dashboards beyond Grafana's shipped defaults, no
+  SLOs (metrics, alerting, and dashboards themselves now exist —
+  `charts/env/prod/central-services/kube-prometheus-stack`).
+* No NetworkPolicy, no Pod-level `securityContext` hardening beyond
+  greeter, no policy-as-code on the Terraform, no infra/integration
+  tests — see [ASSESSMENT.md](ASSESSMENT.md) for the full gap list.
 
 These are called out explicitly (rather than hand-waved) so the current
 state of the system is unambiguous; see [RUNBOOK.md](RUNBOOK.md) for what

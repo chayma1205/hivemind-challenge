@@ -11,10 +11,22 @@ operators use, not cluster-bootstrap infrastructure like
 to be running first for this to come up, and nothing else depends on it
 being up to function.
 
-**Status: not yet deployed.** This chart exists to be reviewed. It isn't
-referenced by `charts/env/prod/argocd-apps.yaml` yet — regenerating that
-(`scripts/generate-argocd-apps.sh`) and pushing is what actually deploys
-it.
+**Status: deployed**, referenced by `charts/env/prod/argocd-apps.yaml`
+(namespace `monitoring`, via that chart directory's `argocd-namespace`
+override — `central-services/`'s default destination is `argocd`, wrong
+for this one).
+
+**Known issue, not yet fixed**: Karpenter's NodePool
+(`../../critical/karpenter`) has no minimum instance size, so it can
+pick an instance (e.g. `c7a.medium`, an 8-pod cap) too small to hold
+this cluster's baseline DaemonSet count (VPC CNI, kube-proxy, Pod
+Identity agent, EBS CSI node plugin, Secrets Store CSI driver, and this
+chart's own node-exporter) — confirmed live: a node-exporter pod stuck
+permanently `Pending`, pinned by its DaemonSet nodeAffinity to one
+specific undersized node. Not something Karpenter can route around (a
+DaemonSet pod isn't schedulable on a *different* node); the fix is
+raising the NodePool's minimum instance size, a deliberate cost/capacity
+tradeoff left for a decision rather than changed unilaterally.
 
 ## What this closes
 

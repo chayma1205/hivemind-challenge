@@ -11,25 +11,25 @@ system.
 |---|---|
 | Architecture & infrastructure design | **9** |
 | Security posture | **6** |
-| Automation & CI/CD | **7** |
-| Observability & reliability | **5** |
+| Automation & CI/CD | **8** |
+| Observability & reliability | **6** |
 | Documentation & process | **9** |
 | Incident response & operational judgment | **9** |
 
-**Overall: 7.5/10 — Senior.** This isn't an average across uniformly
+**Overall: 7.8/10 — Senior.** This isn't an average across uniformly
 mid-level work — it's a spread between consistently senior *judgment*
 (architecture choices, real-time incident diagnosis, knowing when to
 revisit a decision instead of leaving it "good enough") and mid-level
 *systemic* maturity (nothing in the repo catches these classes of bug or
-failure before a human looks). Documentation scores highest it has all
-project: `docs/RUNBOOK.md`'s teardown procedure and
-`docs/DISASTER_RECOVERY.md`'s validation checklist aren't just
-written — they've been checked against what a live attempt actually
-found, and updated with the exact commands and failure modes that
-attempt surfaced, not generic best practice. A straight numeric average
-still understates the judgment on display and overstates the
-operational maturity — read the per-pillar sections below, not just the
-number.
+failure before a human looks). The two pillars that moved this pass both
+moved for the same reason: something that existed only as a design on
+paper became something real and running — kube-prometheus-stack actually
+deployed (Automation, Observability), CI actually linting every chart
+instead of one (Automation), the RUNBOOK/DISASTER_RECOVERY docs actually
+checked against a real attempt instead of just written (Documentation,
+already reflected). A straight numeric average still understates the
+judgment on display and overstates the operational maturity — read the
+per-pillar sections below, not just the number.
 
 ## Seniority level: **Senior**, with a few mid-level gaps that would come up in review
 
@@ -80,24 +80,29 @@ senior level:
   `function-patch-and-transform` pipeline) for per-hostname ACM certs,
   wiring a certificate's ACM-assigned DNS validation record into its
   Route53 record automatically.
-* **A fully specced, not-yet-deployed observability stack**
-  (`charts/env/prod/central-services/kube-prometheus-stack`) built with
-  the same rigor as everything live: node headroom checked against real
-  numbers before deciding node placement, security-group coverage
-  verified live rather than assumed (avoiding a repeat of the
+* **A deployed observability stack**
+  (`charts/env/prod/central-services/kube-prometheus-stack`) built and
+  shipped with the same rigor as everything else: node headroom checked
+  against real numbers before deciding node placement, security-group
+  coverage verified live rather than assumed (avoiding a repeat of the
   metrics-server port gap), EKS control-plane monitors disabled up front
-  because EKS doesn't expose them, and a `NodeNotReadyTooLong` alert
-  written specifically to close a real, named incident from this
-  project's own history.
+  because EKS doesn't expose them, a `NodeNotReadyTooLong` alert written
+  specifically to close a real, named incident from this project's own
+  history, and delivery via SNS instead of the originally-requested SES
+  specifically to avoid a static credential — reused by Argo CD's own
+  Notifications controller rather than standing up a second alerting
+  path.
 
 **What would read as a gap in a senior-level review** (see the checklist
 below for the full list): no automated tests beyond a trivial `go test`,
 no policy-as-code / static analysis on the Terraform or Kubernetes
 manifests, no Pod-level security hardening on most charts, no branch
-protection, an observability stack that's designed but not deployed, and
-several real bugs that only surfaced under live testing — including,
-most recently, a live full-teardown attempt that surfaced undocumented
-hazards in the repo's own teardown procedure.
+protection, a Karpenter NodePool with no minimum instance size (already
+causing a stuck pod on an undersized node), and several real bugs that
+only surfaced under live testing — including, most recently, a live
+full-teardown attempt that surfaced undocumented hazards in the repo's
+own teardown procedure, and the rebuild that followed it finding two
+more.
 
 ## Bugs and incidents found only by running the thing
 
@@ -179,6 +184,30 @@ it.
    incident diagnosis under pressure, and the actual disaster-recovery
    drill `docs/DISASTER_RECOVERY.md` names as never having been run —
    run for the first time this pass, and it found real gaps.
+9. **The rebuild-from-scratch that followed bug 8 found two more live
+   bugs**, neither visible from reading the code, both in the
+   `aws-ebs-csi-driver` addon added earlier this session — its own first
+   real test:
+   - `AmazonEBSCSIDriverPolicyV2`'s ARN was wrong (`service-role/`
+     doesn't belong in its path) — failed `AttachRolePolicy` with
+     `NoSuchEntity` live, cascading into a 20-minute EKS addon timeout
+     waiting for a controller pod that could never authenticate. Fixed
+     against the real ARN, confirmed via `aws iam list-policies`.
+   - The exact same CIDR risk from bug 8 — recurred a *second* time in
+     one session, this time on a freshly created cluster (not a live one
+     drifting), proving it isn't a one-off. Fixed in Terraform this time
+     (`variables.tf`'s default), not just patched live.
+
+   Both **fixed and verified** — the second apply succeeded cleanly.
+   Also surfaced, separately, a real capacity finding left as a known
+   issue rather than fixed unilaterally: Karpenter's NodePool has no
+   minimum instance size, so it picked a `c7a.medium` (8-pod cap) too
+   small to hold this cluster's now-larger baseline DaemonSet count —
+   confirmed live via a permanently `Pending` node-exporter pod pinned
+   by nodeAffinity to that one undersized node. Documented in
+   `charts/env/prod/central-services/kube-prometheus-stack/README.md`
+   rather than silently changed, since raising the NodePool's minimum
+   size is a real cost/capacity tradeoff, not a bug fix.
 
 ## Gaps checklist
 
@@ -219,23 +248,29 @@ history has been removed rather than kept around as a crossed-off entry.
 - [ ] No CI validation of the Terraform at all — no `terraform plan`, no
       `terraform validate`, no drift-detection job.
 - [ ] No integration or infra tests — no Terratest, no `helm template` +
-      `kubeconform`/`kubeval` in CI. Every one of the 8 incidents above
-      is a class of bug this would have caught before a live sync.
+      `kubeconform`/`kubeval` in CI (CI does now lint every chart, not
+      just greeter's — but linting isn't schema/cluster validation).
+      Every one of the 9 incidents above is a class of bug this would
+      have caught before a live sync.
 - [ ] No staging environment that actually exists — `cd-staging.yml`
       builds images with nowhere to deploy them.
-- [ ] `kube-prometheus-stack` is fully specced and reviewed but **not
-      deployed** — not referenced by `argocd-apps.yaml`, needs the
-      `aws-ebs-csi-driver` Terraform prerequisite applied first.
 ### Observability / reliability
 
-- [ ] No observability beyond raw `metrics-server`/CloudWatch defaults
-      **live in the cluster today** — the kube-prometheus-stack spec
-      above closes this on paper but changes nothing until deployed.
 - [ ] No log aggregation, no dashboards beyond Grafana's shipped
-      defaults (once deployed), no SLOs.
+      defaults, no SLOs — metrics/alerting/dashboards exist now
+      (`kube-prometheus-stack`, deployed), but nothing ingests logs and
+      nothing beyond the shipped Grafana dashboards has been built.
 - [ ] Karpenter's node-repair feature gate covers unresponsive
       Karpenter-managed nodes; the EKS-managed system node group has no
       equivalent auto-repair or alerting.
+- [ ] Karpenter's NodePool has no minimum instance size — it can (and
+      did, live) pick an instance too small to hold this cluster's
+      baseline DaemonSet count, leaving a permanently `Pending`
+      DaemonSet pod pinned to that one undersized node with nowhere else
+      it can schedule. See
+      `charts/env/prod/central-services/kube-prometheus-stack/README.md`
+      for the specifics; fix is raising the NodePool's minimum size, a
+      cost/capacity tradeoff left for a deliberate decision.
 
 ## Incident response & operational judgment
 
@@ -292,28 +327,35 @@ they existed:
 ## Net assessment
 
 The *decisions* in this repo are consistently senior, and now include a
-second full architecture area (observability) taken through the same
-level of rigor as the parts that are already live — checked, not
-assumed, at every step (node headroom, security-group coverage,
-EKS-control-plane monitor applicability). The *incident response* is
-consistently senior too, evidenced across eight separate incidents now,
-including one — a live full-teardown attempt — that is exactly the kind
-of high-stakes, ambiguous, multiple-simultaneous-failures scenario that
-separates people who can debug from people who can debug *under
-pressure, while the ground is moving*.
+second full architecture area (observability) not just designed but
+actually deployed, with the same rigor as everything already live —
+checked, not assumed, at every step (node headroom, security-group
+coverage, EKS-control-plane monitor applicability). The *incident
+response* is consistently senior too, evidenced across nine separate
+incidents now, including one — a live full-teardown attempt — that is
+exactly the kind of high-stakes, ambiguous, multiple-simultaneous-failures
+scenario that separates people who can debug from people who can debug
+*under pressure, while the ground is moving*, and a follow-up rebuild
+that found two more real bugs (one from this project's own recent work)
+rather than declaring victory once the teardown itself was handled.
 
 What's unchanged is the shape of the gap: nothing in this system is
-proactive. Every one of the eight incidents in this project's history
-was found by a human looking, not by anything automated. The
-teardown drill made that concrete in a new way — it didn't just
+proactive *on its own*, though two real pieces of that closed this pass
+— a `NodeNotReadyTooLong` alert and Argo CD Notifications on drift are
+both live now, not aspirational. What's still true: every one of the
+nine incidents in this project's history was found by a human looking,
+not flagged automatically before someone went looking for it. The
+teardown drill made the deeper version of that concrete — it didn't just
 demonstrate the observability gap, it demonstrated that the repo's own
 *procedures* (the RUNBOOK's teardown section) hadn't been checked
 against reality either, for exactly the reason `docs/DISASTER_RECOVERY.md`
 already flagged: an unexercised procedure is a belief, not a fact, and
 the first real exercise of one in this project immediately found three
-things it was wrong about. Closing the overall gap is the same
-CI/policy/observability list as before — `terraform plan` in CI,
-`tfsec`/`checkov`, schema validation, Pod Security Admission, alerting on
-node/pod health and Argo CD drift — plus, now, updating the RUNBOOK with
-what this pass actually learned, so the next person (or agent) who runs
-a teardown doesn't have to rediscover the same three hazards live.
+things it was wrong about — then the rebuild that followed found two
+more, in code that had already been written and reviewed earlier in the
+same session. Closing what's left is a shorter list now: `terraform
+plan` in CI, `tfsec`/`checkov`, schema validation, Pod Security
+Admission, log aggregation, and a Karpenter NodePool minimum instance
+size (found live, left as a decision rather than changed
+unilaterally) — plus, still, no automated way to catch the next version
+of any of this before a human runs into it.
