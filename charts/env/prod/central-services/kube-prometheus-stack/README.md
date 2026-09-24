@@ -27,6 +27,12 @@ posting status for hours, unnoticed by anything automated. See
 large set of default rules (`KubePodCrashLooping`, HPA/PDB/quota alerts,
 ...) for everything else this closes for free just by existing.
 
+This chart's Alertmanager has a second consumer besides Prometheus:
+[`../argocd`](../argocd)'s notifications controller pushes into it
+directly (see that chart's README, "Notifications") to alert on
+Application `OutOfSync`/`Degraded` transitions — reusing this chart's
+SNS email delivery rather than standing up a separate path.
+
 ## Prerequisite: the EBS CSI driver
 
 Prometheus/Alertmanager/Grafana all use PersistentVolumeClaims

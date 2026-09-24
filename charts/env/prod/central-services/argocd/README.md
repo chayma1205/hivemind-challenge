@@ -55,9 +55,9 @@ read-only key can't push) — see that chart's README.
 
 ## Access
 
-Ingress is disabled by default (see the `TODO` in `values.yaml`) since it
-depends on the ALB controller and a real domain/ACM certificate. Until
-those exist, port-forward:
+ALB-fronted at `argocd.hivemind.chaima.online` (`server.ingress` in
+`values.yaml`) — see that value's own comment for how TLS is wired. For
+local access without going through the ALB:
 
 ```bash
 kubectl -n argocd port-forward svc/argocd-server 8080:443
@@ -70,6 +70,38 @@ kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.pas
 ```
 
 Rotate it after first login (`argocd account update-password`).
+
+## Notifications
+
+The notifications controller (`argo-cd.notifications` in `values.yaml`)
+pushes into the Alertmanager the
+[`kube-prometheus-stack`](../kube-prometheus-stack) chart installs — not
+a separate Slack/email/webhook integration. Two global subscriptions
+(applying to every Application, no per-chart annotation needed):
+
+* **`on-out-of-sync`** — a custom trigger (not in Argo CD's own built-in
+  catalog, which covers `on-sync-status-unknown` but has no OutOfSync
+  equivalent). Fires once per transition into `OutOfSync`.
+* **`on-health-degraded`** — Argo CD's built-in trigger; this chart just
+  overrides its template to add the `alertmanager:` block the stock
+  template doesn't have.
+
+This exists specifically to close a real, twice-recurring near-miss
+(`docs/ASSESSMENT.md` bugs 6 and 7): a live `kubectl` fix silently
+reverted by `selfHeal` because it wasn't pushed to git yet, caught both
+times only because someone happened to check afterward. An Application
+briefly going `OutOfSync` is exactly what that revert looks like from
+the outside — now it pages instead of waiting to be noticed.
+
+**Known tradeoff, not a bug**: `on-out-of-sync` also fires on ordinary,
+expected syncs (any git-triggered deploy briefly shows `OutOfSync` before
+`selfHeal` reconciles it), so expect one notification per routine deploy
+alongside genuine drift-revert catches. Also, because this pushes a
+one-shot alert into Alertmanager rather than a continuously-scraped
+metric, Alertmanager's own `resolve_timeout` (5m) will mark it resolved
+on a timer regardless of whether the underlying condition actually
+cleared — a "RESOLVED" email 5 minutes later doesn't necessarily mean
+anything was fixed, just that the alert aged out.
 
 ## Notes
 

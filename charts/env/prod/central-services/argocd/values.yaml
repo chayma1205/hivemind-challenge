@@ -91,6 +91,78 @@ argo-cd:
         memory: 256Mi
 
   notifications:
-    # Enable and configure a notifier (Slack/email/webhook) once alerting
-    # requirements are defined.
-    enabled: false
+    enabled: true
+
+    # Pushes into the same Alertmanager the kube-prometheus-stack chart
+    # installs (charts/env/prod/central-services/kube-prometheus-stack),
+    # not a separate Slack/email/webhook integration — reuses the SNS
+    # email delivery already wired there
+    # (terraform/envs/prod/observability.tf) instead of standing up a
+    # second notification path with its own credentials. No auth
+    # needed: this is a plain in-cluster HTTP call to Alertmanager's own
+    # API, and Alertmanager doesn't require one by default.
+    #
+    # Fixes a real, twice-recurring near-miss (docs/ASSESSMENT.md bugs 6
+    # and 7): a live `kubectl` fix silently reverted by `selfHeal`
+    # because it wasn't pushed to git yet, caught both times only by
+    # someone happening to check afterward. An Application briefly going
+    # OutOfSync is exactly what that revert looks like from the outside.
+    notifiers:
+      service.alertmanager: |
+        targets:
+        - kube-prometheus-stack-alertmanager.monitoring.svc.cluster.local:9093
+
+    # Not a built-in trigger — Argo CD's own catalog covers
+    # on-sync-status-unknown (sync status = Unknown) but has no
+    # equivalent for OutOfSync specifically (confirmed against the
+    # catalog at
+    # https://github.com/argoproj/argo-cd/blob/master/notifications_catalog/install.yaml).
+    # on-health-degraded, used below, is built in.
+    triggers:
+      trigger.on-out-of-sync: |
+        - description: Application sync status became OutOfSync
+          send:
+          - app-out-of-sync
+          when: app.status.sync.status == 'OutOfSync'
+
+    templates:
+      template.app-out-of-sync: |
+        message: "Application {{.app.metadata.name}} is OutOfSync."
+        alertmanager:
+          labels:
+            alertname: ArgoCDAppOutOfSync
+            severity: warning
+            namespace: "{{.app.metadata.namespace}}"
+            app: "{{.app.metadata.name}}"
+          annotations:
+            summary: "Argo CD Application {{.app.metadata.name}} drifted from git (OutOfSync)"
+            description: >-
+              {{.app.metadata.name}}'s live state no longer matches git.
+              If selfHeal is on for this Application, this is either a
+              normal in-flight deploy (should clear within a minute or
+              two on its own) or a live kubectl edit about to get
+              reverted — check which before assuming it's nothing.
+      # Overrides the built-in template.app-health-degraded (same name,
+      # so this chart value wins) — the stock one only defines
+      # email/slack blocks, no `alertmanager:` block, so it wouldn't
+      # actually reach the receiver configured above.
+      template.app-health-degraded: |
+        message: "Application {{.app.metadata.name}} is Degraded."
+        alertmanager:
+          labels:
+            alertname: ArgoCDAppDegraded
+            severity: warning
+            namespace: "{{.app.metadata.namespace}}"
+            app: "{{.app.metadata.name}}"
+          annotations:
+            summary: "Argo CD Application {{.app.metadata.name}} is Degraded"
+
+    # Global — applies to every Application, not just ones annotated
+    # individually. Deliberate: the whole point is catching this on
+    # anything, not remembering to opt every chart in one at a time.
+    subscriptions:
+      - recipients:
+          - alertmanager
+        triggers:
+          - on-out-of-sync
+          - on-health-degraded
