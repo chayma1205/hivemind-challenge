@@ -39,6 +39,30 @@ Live endpoints (once DNS/TLS are fully synced):
 - `https://greeter.hivemind.chaima.online` — the app
 - `https://grafana.hivemind.chaima.online` — dashboards
 
+## Credentials
+
+Admin passwords for Argo CD and Grafana are never committed to this
+repo. Two sources, both outside git:
+
+- **Live cluster** (authoritative — read this first):
+  ```bash
+  # Argo CD
+  kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d
+  # Grafana
+  kubectl -n monitoring get secret kube-prometheus-stack-grafana -o jsonpath='{.data.admin-password}' | base64 -d
+  ```
+- **AWS Secrets Manager** (a durable copy, for access without a
+  `kubeconfig` — e.g. reviewing this without full cluster access):
+  `hivemind-prod/argocd-admin-password` and
+  `hivemind-prod/grafana-admin-password`, both in `us-east-1`.
+  ```bash
+  aws secretsmanager get-secret-value \
+    --secret-id hivemind-prod/<argocd|grafana>-admin-password \
+    --profile hivemind --region us-east-1 \
+    --query SecretString --output text
+  ```
+  Both usernames are `admin`.
+
 ## Repo layout
 
 ```
