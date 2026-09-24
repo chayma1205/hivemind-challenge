@@ -64,6 +64,8 @@ spec:
     automated:
       prune: true
       selfHeal: true
+    syncOptions:
+      - ServerSideApply=true
 EOF
 }
 
@@ -109,6 +111,21 @@ EOF
       selfHeal: true
     syncOptions:
       - CreateNamespace=true
+      # Confirmed live, needed for kube-prometheus-stack specifically:
+      # the Prometheus Operator's CRDs (Prometheus, Alertmanager, ...)
+      # are large enough that kubectl's client-side apply
+      # (last-applied-configuration annotation) exceeds Kubernetes's
+      # 256KiB annotation size limit, failing every sync attempt with
+      # "metadata.annotations: Too long" and silently blocking the rest
+      # of that sync operation's changes too (this is how an unrelated
+      # Grafana values.yaml fix never reached the cluster despite
+      # several syncs "succeeding"). Server-Side Apply doesn't use that
+      # annotation at all, so it doesn't hit the limit. Applied to every
+      # Application, not just that one, since it's the same well-known
+      # fix and there's no real downside for charts too small to hit
+      # this problem — one behavior for all Applications, not a
+      # special case.
+      - ServerSideApply=true
 EOF
 }
 
