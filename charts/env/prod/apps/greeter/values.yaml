@@ -54,9 +54,10 @@ ingress:
     # auto-discovers a matching ACM cert by comparing this Ingress's
     # spec.tls[].hosts (and rules[].host) against certificates in ACM
     # (https://kubernetes-sigs.github.io/aws-load-balancer-controller/latest/guide/ingress/cert_discovery/)
-    # — terraform/envs/prod/domain.tf provisions a real, dedicated
-    # per-hostname cert for exactly this host, fully automatically (one
-    # `terraform apply`, no manual ARN copy-paste). Set this annotation
+    # — charts/env/prod/critical/crossplane provisions a real, dedicated
+    # per-hostname cert for exactly this host, fully automatically (see
+    # that chart's ingressCertificates.hostnames and
+    # templates/composition-ingresscertificate.yaml). Set this annotation
     # explicitly only if that discovery ever needs overriding.
   host: greeter.hivemind.chaima.online
 

@@ -78,14 +78,17 @@ without it.
   Slack/SES/PagerDuty target has been chosen, and wiring one blind would
   mean guessing at credentials that don't exist. See "Adding a real
   alert receiver" below.
-* **Grafana has no ingress.** Reachable via
-  `kubectl port-forward svc/kube-prometheus-stack-grafana 3000:80 -n
-  <namespace>` for now — the same reasoning as the null receiver: get
-  it running and actually used first, then give it a real hostname and a
-  Crossplane-managed cert
-  (`../../critical/crossplane/templates/composition-ingresscertificate.yaml`'s
-  pattern — add a hostname to `ingressCertificates.hostnames` there, same
-  as `argocd`/`greeter`) once that's worth doing.
+* **Grafana is ALB-fronted at `grafana.hivemind.chaima.online`**, same
+  pattern as `../argocd`/`../../apps/greeter`: no `certificate-arn`
+  annotation (the ALB controller auto-discovers a matching ACM cert by
+  hostname), and no `tls[].secretName` (the controller doesn't do
+  secret-based TLS termination, so there's nothing for one to do). The
+  cert itself is Crossplane-managed —
+  `grafana` was added to
+  `../../critical/crossplane/values.yaml`'s `ingressCertificates.hostnames`
+  alongside `argocd`/`greeter`, so it's provisioned the same automatic
+  way theirs are
+  (`../../critical/crossplane/templates/composition-ingresscertificate.yaml`).
 * **`serviceMonitorSelectorNilUsesHelmValues`/`podMonitorSelectorNilUsesHelmValues`/`ruleSelectorNilUsesHelmValues`
   are all `false`** — Prometheus watches every ServiceMonitor/PodMonitor/
   PrometheusRule in the cluster, not just label-matched ones. This is a

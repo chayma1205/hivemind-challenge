@@ -117,3 +117,4 @@ ingressCertificates:
   hostnames:
     argocd: argocd.hivemind.chaima.online
     greeter: greeter.hivemind.chaima.online
+    grafana: grafana.hivemind.chaima.online

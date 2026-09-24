@@ -137,13 +137,39 @@ kube-prometheus-stack:
     #   kubectl get secret -n <namespace> <release>-grafana \
     #     -o jsonpath='{.data.admin-password}' | base64 -d
     #
-    # No ingress configured yet — deliberately, same reasoning as the
-    # null Alertmanager receiver: this stack should exist and be
-    # reachable via port-forward first, get an ingress (and a Crossplane
-    # IngressCertificate, matching charts/env/prod/critical/crossplane's
-    # pattern) once it's actually being used day to day.
+    # ALB-fronted, same pattern as the argocd/greeter ingresses
+    # (../argocd/values.yaml, ../../apps/greeter/values.yaml): no
+    # certificate-arn annotation — the ALB controller auto-discovers a
+    # matching ACM cert by comparing spec.tls[].hosts against certificates
+    # in ACM
+    # (https://kubernetes-sigs.github.io/aws-load-balancer-controller/latest/guide/ingress/cert_discovery/).
+    # The cert itself is Crossplane-managed
+    # (../../critical/crossplane/templates/composition-ingresscertificate.yaml)
+    # — "grafana" was added to that chart's values.yaml
+    # ingressCertificates.hostnames alongside this.
+    #
+    # No `tls[].secretName` — the ALB controller doesn't do secret-based
+    # TLS termination, it only reads `hosts` to run cert discovery; a
+    # secretName here would be dead weight the chart's own template
+    # doesn't require.
     ingress:
-      enabled: false
+      enabled: true
+      ingressClassName: alb
+      hosts:
+        - grafana.hivemind.chaima.online
+      tls:
+        - hosts:
+            - grafana.hivemind.chaima.online
+      annotations:
+        alb.ingress.kubernetes.io/scheme: internet-facing
+        alb.ingress.kubernetes.io/target-type: ip
+        alb.ingress.kubernetes.io/backend-protocol: HTTP
+        # /api/health, not / — the root path 302-redirects to /login,
+        # which ALB target-group health checks treat as unhealthy by
+        # default; Grafana's own health endpoint returns a plain 200.
+        alb.ingress.kubernetes.io/healthcheck-path: /api/health
+        alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS": 443}]'
+        alb.ingress.kubernetes.io/ssl-redirect: "443"
     sidecar:
       dashboards:
         enabled: true
