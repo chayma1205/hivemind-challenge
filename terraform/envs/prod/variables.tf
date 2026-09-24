@@ -106,6 +106,12 @@ variable "domain_name" {
   default     = "hivemind.chaima.online"
 }
 
+variable "alert_email" {
+  description = "Email address subscribed to the Alertmanager SNS topic (see observability.tf). SNS emails a confirmation link to this address on first apply — a real, one-time manual step (click it), the same class of thing as this stack's other human-in-the-loop steps (docs/DECISIONS.md #10)."
+  type        = string
+  default     = "chaima.ben.haha.it@gmail.com"
+}
+
 variable "tags" {
   description = "Tags applied to all resources in this stack."
   type        = map(string)

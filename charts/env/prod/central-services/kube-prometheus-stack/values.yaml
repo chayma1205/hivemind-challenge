@@ -80,6 +80,12 @@ kube-prometheus-stack:
       ruleSelectorNilUsesHelmValues: false
 
   alertmanager:
+    # Pinned (the subchart's own default is "", auto-generated) so
+    # terraform/envs/prod/observability.tf's EKS Pod Identity association
+    # has a stable target — same reasoning as crossplane's
+    # runtimeConfig.serviceAccountName.
+    serviceAccount:
+      name: alertmanager
     alertmanagerSpec:
       replicas: 1
       resources:
@@ -99,19 +105,40 @@ kube-prometheus-stack:
                 # notification/silence state (so a pod restart doesn't
                 # re-fire every currently-active alert), not metrics data.
                 storage: 2Gi
-    # No real receiver wired yet — deliberately. Alerts are fully visible
-    # and queryable (Prometheus, Alertmanager UI, Grafana) but nothing
-    # pages anyone until a receiver (Slack/SES/PagerDuty/...) is chosen
-    # and its credentials provisioned. See this chart's README for how to
-    # add one without rethinking anything else here.
+    # Delivers via SNS, not SES/SMTP — chosen specifically to avoid a
+    # static credential. sigv4 with no access_key/secret_key falls back
+    # to the AWS SDK's default credential chain, which for this pod means
+    # its EKS Pod Identity association
+    # (terraform/envs/prod/observability.tf, scoped to sns:Publish on
+    # exactly this one topic) — no access key anywhere, unlike SES's SMTP
+    # interface, whose password is derived from a long-lived IAM access
+    # key. The SNS topic has an email subscription
+    # (terraform/envs/prod/observability.tf's
+    # aws_sns_topic_subscription.alertmanager_email) — SNS emails a
+    # confirmation link on first apply; delivery is silently a no-op
+    # until that's clicked.
     config:
       route:
-        receiver: "null"
+        receiver: "sns"
         group_by: ["alertname", "namespace"]
         group_wait: 30s
         group_interval: 5m
         repeat_interval: 12h
       receivers:
+        - name: "sns"
+          sns_configs:
+            # terraform/envs/prod output `alertmanager_sns_topic_arn`.
+            - topic_arn: "arn:aws:sns:us-east-1:324464328617:hivemind-prod-alertmanager"
+              sigv4:
+                region: us-east-1
+              subject: '{{ template "sns.default.subject" . }}'
+        # Kept, not dead weight: the subchart injects its own route
+        # sending the always-firing "Watchdog" alert (proof the pipeline
+        # itself is alive) to a receiver literally named "null" — that
+        # route exists regardless of what's configured here, so removing
+        # this receiver definition would leave it pointing at nothing and
+        # fail Alertmanager's own config validation at startup. Confirmed
+        # by rendering this chart and reading the actual generated route.
         - name: "null"
 
   grafana:

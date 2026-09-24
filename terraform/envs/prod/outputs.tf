@@ -89,6 +89,16 @@ output "ebs_csi_driver_iam_role_arn" {
   value       = module.ebs_csi_pod_identity.iam_role_arn
 }
 
+output "alertmanager_sns_topic_arn" {
+  description = "SNS topic ARN Alertmanager publishes alerts to — set in the kube-prometheus-stack chart's alertmanager.config.receivers \"sns\" entry (topic_arn)."
+  value       = aws_sns_topic.alertmanager.arn
+}
+
+output "alertmanager_iam_role_arn" {
+  description = "IAM role ARN for Alertmanager's SNS publish access — bound via the EKS Pod Identity association in observability.tf."
+  value       = module.alertmanager_pod_identity.iam_role_arn
+}
+
 output "github_actions_ecr_push_role_arn" {
   description = "OIDC role ARN GitHub Actions assumes to push to ECR — set as AWS_ROLE_ARN in .github/workflows/cd.yml."
   value       = module.github_actions_ecr_push_irsa.arn

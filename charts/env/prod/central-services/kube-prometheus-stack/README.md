@@ -72,12 +72,21 @@ without it.
   components the way the chart's defaults expect; left enabled, every
   target would sit permanently `down` and generate noise instead of
   signal.
-* **Alertmanager has no real receiver configured** — `route.receiver:
-  "null"`. Alerts are fully visible and queryable (Prometheus UI,
-  Alertmanager UI, Grafana) but nothing pages anyone yet. Deliberate: no
-  Slack/SES/PagerDuty target has been chosen, and wiring one blind would
-  mean guessing at credentials that don't exist. See "Adding a real
-  alert receiver" below.
+* **Alertmanager delivers via SNS, not SES/SMTP.** Both were considered;
+  SNS won specifically to avoid a static credential. Alertmanager's
+  built-in email receiver is SMTP-only, and SES's SMTP password is
+  derived from a long-lived IAM access key — a real, permanent exception
+  to this stack's "no static credentials, ever" pattern
+  (`docs/DECISIONS.md`). SNS's `sns_configs` receiver signs requests with
+  AWS SigV4 and, with no `access_key`/`secret_key` set, falls back to the
+  AWS SDK's default credential chain — which for this pod means its EKS
+  Pod Identity association (`terraform/envs/prod/observability.tf`,
+  scoped to `sns:Publish` on exactly one topic). The topic has an email
+  subscription to the operator's address — SNS emails a confirmation
+  link on first apply, and delivers nothing until it's clicked, the same
+  class of human-in-the-loop step as this stack's other credential/
+  identity setup (`docs/DECISIONS.md` #10). See "Adding another alert
+  receiver" below for adding Slack/PagerDuty/etc. alongside SNS.
 * **Grafana is ALB-fronted at `grafana.hivemind.chaima.online`**, same
   pattern as `../argocd`/`../../apps/greeter`: no `certificate-arn`
   annotation (the ALB controller auto-discovers a matching ACM cert by
@@ -96,20 +105,33 @@ without it.
   exist for has no real benefit here, only the cost of remembering to
   label every future monitor correctly.
 
-## Adding a real alert receiver
+## Adding another alert receiver
 
-Change `kube-prometheus-stack.alertmanager.config` in `values.yaml`:
-default the route to a real receiver name, add that receiver under
-`receivers`, and — for anything needing a credential (a Slack webhook
-URL, SES/SMTP creds) — reference a Kubernetes Secret via
-`alertmanagerSpec.secrets` rather than putting the credential in this
-file. Nothing else in this chart needs to change.
+To add Slack/PagerDuty/etc. *alongside* SNS: add a new entry under
+`kube-prometheus-stack.alertmanager.config.receivers` in `values.yaml`,
+and route to it either as the default (`route.receiver`) or via a
+sub-route matching on severity/alertname. For anything needing a
+credential (a Slack webhook URL, a PagerDuty integration key), reference
+a Kubernetes Secret via `alertmanagerSpec.secrets` rather than putting
+the credential in this file. Don't remove the `"null"` receiver when
+editing this — the subchart injects its own route sending the
+always-firing `Watchdog` alert to a receiver literally named `"null"`,
+and removing that receiver definition leaves the route pointing at
+nothing (confirmed by rendering this chart and reading the generated
+config — this isn't a guess).
 
 ## Install (once reviewed — not yet wired into `argocd-apps.yaml`)
 
 ```bash
-# 1. Apply the EBS CSI driver prerequisite (terraform/envs/prod)
-cd terraform/envs/prod && terraform apply -target=module.eks -target=module.ebs_csi_pod_identity -target=aws_iam_role_policy_attachment.ebs_csi_driver -target=aws_eks_pod_identity_association.ebs_csi_driver
+# 1. Apply the prerequisites (terraform/envs/prod): the EBS CSI driver
+#    (for this chart's PVCs) and the SNS topic + Pod Identity role for
+#    Alertmanager (observability.tf). Confirm the SNS subscription
+#    confirmation email (sent to var.alert_email) is clicked, or alerts
+#    will fire but never arrive.
+cd terraform/envs/prod && terraform apply \
+  -target=module.eks \
+  -target=module.ebs_csi_pod_identity -target=aws_iam_role_policy_attachment.ebs_csi_driver -target=aws_eks_pod_identity_association.ebs_csi_driver \
+  -target=aws_sns_topic.alertmanager -target=aws_sns_topic_subscription.alertmanager_email -target=module.alertmanager_pod_identity -target=aws_iam_role_policy.alertmanager_sns -target=aws_eks_pod_identity_association.alertmanager
 
 # 2. Regenerate and commit the Argo CD Application set
 cd ../../.. && ./scripts/generate-argocd-apps.sh
