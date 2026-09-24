@@ -16,17 +16,17 @@ being up to function.
 override — `central-services/`'s default destination is `argocd`, wrong
 for this one).
 
-**Known issue, not yet fixed**: Karpenter's NodePool
-(`../../critical/karpenter`) has no minimum instance size, so it can
-pick an instance (e.g. `c7a.medium`, an 8-pod cap) too small to hold
-this cluster's baseline DaemonSet count (VPC CNI, kube-proxy, Pod
-Identity agent, EBS CSI node plugin, Secrets Store CSI driver, and this
-chart's own node-exporter) — confirmed live: a node-exporter pod stuck
-permanently `Pending`, pinned by its DaemonSet nodeAffinity to one
-specific undersized node. Not something Karpenter can route around (a
-DaemonSet pod isn't schedulable on a *different* node); the fix is
-raising the NodePool's minimum instance size, a deliberate cost/capacity
-tradeoff left for a decision rather than changed unilaterally.
+**Fixed**: Karpenter's NodePool (`../../critical/karpenter`) picked an
+instance (`c7a.medium`, an 8-pod cap) too small to hold this cluster's
+baseline DaemonSet count (VPC CNI, kube-proxy, Pod Identity agent, EBS
+CSI node plugin, Secrets Store CSI driver, and this chart's own
+node-exporter) — confirmed live: a node-exporter pod stuck permanently
+`Pending`, pinned by its DaemonSet nodeAffinity to one specific
+undersized node, which Karpenter can't route around by provisioning
+capacity elsewhere (a DaemonSet pod isn't schedulable on a *different*
+node). Fixed at the NodePool level — see
+`../../critical/karpenter/templates/nodepool.yaml`'s `instance-size`
+requirement and that chart's README for the full reasoning.
 
 ## What this closes
 

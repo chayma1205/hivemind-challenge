@@ -30,16 +30,12 @@ classic IRSA) and wired into [`values.yaml`](values.yaml):
    `NodePool` only uses on-demand capacity — harmless, and one less thing
    to wire up later if that changes).
 
-## ⚠️ One prerequisite still missing
-
 **Discovery tags** — Karpenter finds subnets and the node security group by
 tag (`karpenter.sh/discovery = hivemind-prod` by default here, see
-[`templates/nodeclass.yaml`](templates/nodeclass.yaml)). This tag isn't yet
-applied to the VPC module's private subnets or the EKS node security group
-in `terraform/envs/prod` — add it there before this chart's `NodePool` can
-actually launch anything. Until then, `helm install` succeeds and the
-controller runs, but any pod relying on Karpenter for capacity stays
-unschedulable.
+[`templates/nodeclass.yaml`](templates/nodeclass.yaml)), applied to the
+VPC module's private subnets and the EKS node security group in
+`terraform/envs/prod/main.tf` (`private_subnet_tags`,
+`node_security_group_tags`).
 
 ## Install
 
@@ -51,6 +47,23 @@ helm upgrade --install karpenter . \
   --namespace kube-system \
   -f values.yaml
 ```
+
+## NodePool instance selection
+
+[`templates/nodepool.yaml`](templates/nodepool.yaml)'s `requirements`
+restrict Karpenter to `amd64`, on-demand, third-generation-or-newer
+instances in `nodePool.instanceCategories` (`c`/`m`/`r` by default) —
+plus, as of a live incident, excluding `nano`/`micro`/`small`/`medium`
+sizes. Confirmed live: a `c7a.medium` (2 vCPU) got picked, and its
+max-pods (8, an ENI/IP-allocation limit tied to instance size) was
+nearly consumed by baseline DaemonSets alone (VPC CNI, kube-proxy, Pod
+Identity agent, EBS CSI node plugin, Secrets Store CSI driver +
+provider, kube-prometheus-stack's node-exporter) — one of those
+DaemonSet pods ended up permanently `Pending`, pinned by its own
+nodeAffinity to that one undersized node with nowhere else it could
+schedule. A DaemonSet pod isn't reschedulable onto a *different* node by
+Karpenter provisioning more capacity elsewhere, so this needed fixing at
+the NodePool level, not by adding nodes.
 
 ## What this chart does *not* do
 

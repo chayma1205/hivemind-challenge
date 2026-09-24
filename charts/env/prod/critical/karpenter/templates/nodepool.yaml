@@ -25,6 +25,20 @@ spec:
         - key: karpenter.k8s.aws/instance-generation
           operator: Gt
           values: ["2"]
+        # Confirmed live: a c7a.medium (2 vCPU) got picked and its
+        # max-pods (8, driven by ENI/IP allocation at that size) was
+        # nearly consumed by baseline DaemonSets alone (VPC CNI,
+        # kube-proxy, Pod Identity agent, EBS CSI node plugin, Secrets
+        # Store CSI driver + provider, node-exporter) — one of those
+        # DaemonSet pods ended up permanently Pending, pinned by
+        # nodeAffinity to that one undersized node with nowhere else it
+        # could schedule. `nano`/`micro`/`small`/`medium` all have this
+        # problem to varying degrees across every family in
+        # instanceCategories; `large` and up have enough ENI/IP headroom
+        # for this cluster's current and near-future DaemonSet count.
+        - key: karpenter.k8s.aws/instance-size
+          operator: NotIn
+          values: ["nano", "micro", "small", "medium"]
       expireAfter: {{ .Values.nodePool.expireAfter }}
   limits:
     cpu: {{ .Values.nodePool.limits.cpu | quote }}

@@ -97,9 +97,8 @@ senior level:
 below for the full list): no automated tests beyond a trivial `go test`,
 no policy-as-code / static analysis on the Terraform or Kubernetes
 manifests, no Pod-level security hardening on most charts, no branch
-protection, a Karpenter NodePool with no minimum instance size (already
-causing a stuck pod on an undersized node), and several real bugs that
-only surfaced under live testing — including, most recently, a live
+protection, and several real bugs that only surfaced under live
+testing — including, most recently, a live
 full-teardown attempt that surfaced undocumented hazards in the repo's
 own teardown procedure, and the rebuild that followed it finding two
 more.
@@ -199,15 +198,17 @@ it.
      (`variables.tf`'s default), not just patched live.
 
    Both **fixed and verified** — the second apply succeeded cleanly.
-   Also surfaced, separately, a real capacity finding left as a known
-   issue rather than fixed unilaterally: Karpenter's NodePool has no
-   minimum instance size, so it picked a `c7a.medium` (8-pod cap) too
-   small to hold this cluster's now-larger baseline DaemonSet count —
-   confirmed live via a permanently `Pending` node-exporter pod pinned
-   by nodeAffinity to that one undersized node. Documented in
-   `charts/env/prod/central-services/kube-prometheus-stack/README.md`
-   rather than silently changed, since raising the NodePool's minimum
-   size is a real cost/capacity tradeoff, not a bug fix.
+   Also surfaced, separately, a real capacity finding — Karpenter's
+   NodePool had no minimum instance size, so it picked a `c7a.medium`
+   (8-pod cap) too small to hold this cluster's now-larger baseline
+   DaemonSet count, leaving a node-exporter pod permanently `Pending`,
+   pinned by nodeAffinity to that one undersized node. Deliberately
+   *not* fixed in the same pass as the two bugs above — raising a
+   NodePool's minimum instance size is a real cost/capacity tradeoff,
+   not a bug fix, so it was left as a documented, open decision until
+   explicitly confirmed. **Later fixed** (`templates/nodepool.yaml`'s
+   `instance-size` requirement) once that confirmation came — see that
+   chart's README for the full reasoning.
 
 ## Gaps checklist
 
@@ -263,14 +264,6 @@ history has been removed rather than kept around as a crossed-off entry.
 - [ ] Karpenter's node-repair feature gate covers unresponsive
       Karpenter-managed nodes; the EKS-managed system node group has no
       equivalent auto-repair or alerting.
-- [ ] Karpenter's NodePool has no minimum instance size — it can (and
-      did, live) pick an instance too small to hold this cluster's
-      baseline DaemonSet count, leaving a permanently `Pending`
-      DaemonSet pod pinned to that one undersized node with nowhere else
-      it can schedule. See
-      `charts/env/prod/central-services/kube-prometheus-stack/README.md`
-      for the specifics; fix is raising the NodePool's minimum size, a
-      cost/capacity tradeoff left for a deliberate decision.
 
 ## Incident response & operational judgment
 
