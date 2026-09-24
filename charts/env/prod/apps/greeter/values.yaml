@@ -9,7 +9,7 @@ image:
   # tag lands in ECR (published as a GitHub Release in the hivemind-greeter
   # repo — see docs/DECISIONS.md #11). Don't hand-edit once that's live;
   # it'll just be overwritten on the next sync.
-  tag: "v1.0.0"
+  tag: "v1.0.1"
   pullPolicy: IfNotPresent
   name: 324464328617.dkr.ecr.us-east-1.amazonaws.com/hivemind-greeter
 # Pod-level hardening. runAsUser is REQUIRED alongside runAsNonRoot, not
