@@ -1,9 +1,8 @@
 # IRSA for Karpenter's controller, plus the IAM role Karpenter-launched EC2
 # nodes assume and the SQS queue/EventBridge rules for interruption
-# handling. Fills the gaps documented as TODOs in
-# charts/env/prod/critical/karpenter/values.yaml — that chart's
-# serviceAccount.annotations and nodePool.nodeRoleName should be set to
-# this module's iam_role_arn / node_iam_role_name outputs.
+# handling. This module's iam_role_arn / node_iam_role_name outputs are
+# copied into charts/env/prod/critical/karpenter/values.yaml's
+# serviceAccount.annotations and nodePool.nodeRoleName respectively.
 module "karpenter" {
   source  = "terraform-aws-modules/eks/aws//modules/karpenter"
   version = "~> 20.31"
@@ -49,10 +48,10 @@ module "karpenter" {
   tags = var.tags
 }
 
-# IRSA for the AWS Load Balancer Controller. Fills the TODO documented in
-# charts/env/prod/critical/aws-load-balancer-controller/values.yaml —
-# that chart's serviceAccount.annotations should be set to this module's
-# iam_role_arn output.
+# IRSA for the AWS Load Balancer Controller. This module's iam_role_arn
+# output is copied into
+# charts/env/prod/critical/aws-load-balancer-controller/values.yaml's
+# serviceAccount.annotations.
 module "aws_load_balancer_controller_irsa" {
   # v5.x, not v6.x: v6's iam-role-for-service-accounts submodule requires
   # aws provider >= 6.28, which conflicts with the eks module (~> 20.31)

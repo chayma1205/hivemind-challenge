@@ -57,8 +57,10 @@ nodePool:
   # `karpenter_node_iam_role_name`.
   nodeRoleName: "hivemind-prod-karpenter-node"
   # Tags used to discover subnets/security groups for launched nodes.
-  # TODO: apply the matching `karpenter.sh/discovery = <cluster-name>` tag
-  # to the VPC's private subnets and the node security group in Terraform.
+  # Matching `karpenter.sh/discovery = <cluster-name>` tag is applied to
+  # the VPC's private subnets and the node security group in
+  # terraform/envs/prod/main.tf (private_subnet_tags,
+  # node_security_group_tags).
   discoveryTagKey: karpenter.sh/discovery
   discoveryTagValue: hivemind-prod
 

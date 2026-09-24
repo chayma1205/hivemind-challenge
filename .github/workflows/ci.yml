@@ -3,7 +3,7 @@ name: CI
 # This repo is GitOps-only now: the greeter app's source, Dockerfile, and
 # build/test/scan/push pipeline moved to a separate repo
 # (https://github.com/chayma1205/hivemind-greeter — see docs/DECISIONS.md
-# #11). All that's left to validate here is the Helm chart this repo
+# #11). What's left to validate here is every Helm chart this repo
 # renders into charts/env/prod/argocd-apps.yaml.
 on:
   pull_request:
@@ -28,7 +28,7 @@ concurrency:
 
 jobs:
   helm-lint:
-    name: Lint the greeter Helm chart
+    name: Lint every Helm chart
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -37,9 +37,29 @@ jobs:
         with:
           version: "v3.17.3"
 
-      - name: helm lint
-        working-directory: charts/env/prod/apps/greeter
-        run: helm lint . --set image.repository=placeholder --set image.tag=placeholder
+      - name: helm lint (every chart under charts/env/prod)
+        run: |
+          set -euo pipefail
+          status=0
+          # Same discovery as scripts/generate-argocd-apps.sh: any
+          # directory with a Chart.yaml, under central-services/,
+          # critical/, or apps/.
+          for chart_dir in charts/env/prod/central-services/*/ charts/env/prod/critical/*/ charts/env/prod/apps/*/; do
+            [[ -f "${chart_dir}Chart.yaml" ]] || continue
+            echo "::group::${chart_dir}"
+            if [[ -f "${chart_dir}Chart.yaml" ]] && grep -q "^dependencies:" "${chart_dir}Chart.yaml"; then
+              helm dependency update "${chart_dir}"
+            fi
+            if [[ "${chart_dir}" == charts/env/prod/apps/greeter/ ]]; then
+              # Chart requires image.repository/tag — no default, set by
+              # argocd-apps.yaml's per-app parameters at deploy time.
+              helm lint "${chart_dir}" --set image.repository=placeholder --set image.tag=placeholder || status=1
+            else
+              helm lint "${chart_dir}" -f "${chart_dir}values.yaml" || status=1
+            fi
+            echo "::endgroup::"
+          done
+          exit "${status}"
 
   argocd-apps-up-to-date:
     name: argocd-apps.yaml matches the chart directories
